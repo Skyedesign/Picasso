@@ -35,6 +35,21 @@ class Config(BaseModel):
         return v
 
 
+def find_project_root(start: Path | None = None) -> Path:
+    """Walk up from `start` (default: cwd) looking for a project marker file.
+
+    This lets tools anchor their paths (batches/, imgproc.yaml) to the project
+    root regardless of the directory the user launched them from — important for
+    `imgproc-ui`, which ends up running with cwd=.venv/Scripts on Windows when
+    users double-click the installed script.
+    """
+    start = start or Path.cwd()
+    for parent in [start, *start.parents]:
+        if (parent / "imgproc.yaml").exists() or (parent / "pyproject.toml").exists():
+            return parent
+    return start
+
+
 def load_config(path: Path | None = None, overrides: dict | None = None) -> Config:
     """Load YAML config, then apply any overrides (e.g. a per-folder folder.yaml)."""
     data: dict = {}

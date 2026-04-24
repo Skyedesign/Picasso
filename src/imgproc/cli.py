@@ -10,7 +10,7 @@ from pathlib import Path
 import click
 from PIL import Image
 
-from .config import Config
+from .config import Config, find_project_root
 from .engine import (
     Detection,
     compute_group_stats,
@@ -38,7 +38,7 @@ def _resolve_config(folder: Path, config_path: Path | None, cli_overrides: dict)
     # touching the global defaults.
     import yaml  # local import keeps the CLI startup light when yaml is unused
 
-    base_path = config_path or Path.cwd() / "imgproc.yaml"
+    base_path = config_path or find_project_root() / "imgproc.yaml"
     data: dict = {}
     if base_path.exists():
         data.update(yaml.safe_load(base_path.read_text(encoding="utf-8")) or {})

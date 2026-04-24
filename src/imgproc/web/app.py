@@ -27,11 +27,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..cli import IMAGE_EXTS, main as cli_main
-from ..config import Config
+from ..config import Config, find_project_root
 
 STATIC = Path(__file__).parent / "static"
-BATCHES_ROOT = (Path.cwd() / "batches").resolve()
-CONFIG_PATH = Path.cwd() / "imgproc.yaml"
+_PROJECT_ROOT = find_project_root()
+BATCHES_ROOT = (_PROJECT_ROOT / "batches").resolve()
+CONFIG_PATH = _PROJECT_ROOT / "imgproc.yaml"
 BATCHES_ROOT.mkdir(exist_ok=True)
 
 # Conservative: alphanumerics, dash, underscore, space. Prevents path traversal and
