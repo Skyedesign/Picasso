@@ -53,9 +53,15 @@
         Copy images from an existing folder (e.g. an export from Pegasus) into a new batch.
         Only image files (.jpg, .png, .webp, .bmp) are imported; everything else is skipped.
       </p>
+      <div class="dialog-field" id="source-picker-wrap" hidden>
+        <span>Pick a folder from <code id="source-root-label">source/</code></span>
+        <select id="source-picker">
+          <option value="">— select a folder —</option>
+        </select>
+      </div>
       <label class="dialog-field">
-        <span>Source folder path</span>
-        <input name="source_path" type="text" placeholder="e.g. C:\Users\alida\Downloads\bells-heroes" required autofocus>
+        <span>Or paste a source folder path</span>
+        <input name="source_path" type="text" placeholder="e.g. C:\Users\alida\Downloads\bells-heroes" required>
         <small>Tip: in Windows Explorer, right-click the folder and choose "Copy as path".</small>
       </label>
       <label class="dialog-field">

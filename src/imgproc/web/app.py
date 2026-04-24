@@ -118,6 +118,45 @@ def create_batch(body: NewBatch) -> dict:
     return {"name": name}
 
 
+_SOURCE_MAX_DEPTH = 3  # how deep under source/ to walk when populating the dropdown
+
+
+@app.get("/api/source-folders")
+def list_source_folders() -> dict:
+    """Enumerate folders under source/ that contain image files, so the UI can
+    show Alida a picker instead of requiring her to paste a path."""
+    source_root = (_PROJECT_ROOT / "source").resolve()
+    if not source_root.is_dir():
+        return {"root": str(source_root), "exists": False, "folders": []}
+
+    folders = []
+
+    def walk(path: Path, depth: int) -> None:
+        if depth > _SOURCE_MAX_DEPTH:
+            return
+        try:
+            entries = list(path.iterdir())
+        except (PermissionError, OSError):
+            return
+        image_count = sum(
+            1 for p in entries
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+        )
+        if image_count > 0:
+            folders.append({
+                "path": str(path),
+                "relative": str(path.relative_to(source_root)) or ".",
+                "image_count": image_count,
+            })
+        for p in entries:
+            if p.is_dir() and not p.name.startswith("."):
+                walk(p, depth + 1)
+
+    walk(source_root, 0)
+    folders.sort(key=lambda f: f["relative"].lower())
+    return {"root": str(source_root), "exists": True, "folders": folders}
+
+
 class ImportRequest(BaseModel):
     name: str
     source_path: str

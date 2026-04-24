@@ -378,13 +378,22 @@ dialog#import-dialog::backdrop {
   font-size: 13px;
   font-weight: 500;
 }
-.dialog-field input[type="text"] {
+.dialog-field input[type="text"],
+.dialog-field select {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 5px;
   font: inherit;
   font-family: var(--mono);
   font-size: 12px;
+  background: white;
+}
+.dialog-field code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 .dialog-field small {
   font-size: 11px;

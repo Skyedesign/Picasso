@@ -17,6 +17,9 @@ const els = {
   importDialog: document.getElementById('import-dialog'),
   importForm: document.getElementById('import-form'),
   importCancel: document.getElementById('import-cancel'),
+  sourcePickerWrap: document.getElementById('source-picker-wrap'),
+  sourcePicker: document.getElementById('source-picker'),
+  sourceRootLabel: document.getElementById('source-root-label'),
 };
 
 // ─── Toast ─────────────────────────────────────────────────────────────
@@ -121,9 +124,34 @@ async function newBatch() {
   }
 }
 
-function openImportDialog() {
+async function openImportDialog() {
   els.importForm.reset();
+  await populateSourcePicker();
   els.importDialog.showModal();
+}
+
+async function populateSourcePicker() {
+  // Clear previous entries
+  els.sourcePicker.innerHTML = '<option value="">— select a folder —</option>';
+  try {
+    const data = await api('/api/source-folders');
+    if (!data.exists || !data.folders.length) {
+      els.sourcePickerWrap.hidden = true;
+      return;
+    }
+    els.sourceRootLabel.textContent = data.root;
+    for (const f of data.folders) {
+      const opt = document.createElement('option');
+      opt.value = f.path;
+      const rel = f.relative === '.' ? '(root)' : f.relative;
+      opt.textContent = `${rel} — ${f.image_count} image${f.image_count === 1 ? '' : 's'}`;
+      els.sourcePicker.appendChild(opt);
+    }
+    els.sourcePickerWrap.hidden = false;
+  } catch (err) {
+    // Silent degradation — user can still paste a path manually.
+    els.sourcePickerWrap.hidden = true;
+  }
 }
 
 async function handleImportSubmit(e) {
@@ -523,6 +551,17 @@ els.newBatch.addEventListener('click', newBatch);
 els.importBatch.addEventListener('click', openImportDialog);
 els.importCancel.addEventListener('click', () => els.importDialog.close());
 els.importForm.addEventListener('submit', handleImportSubmit);
+els.sourcePicker.addEventListener('change', () => {
+  if (els.sourcePicker.value) {
+    els.importForm.querySelector('input[name="source_path"]').value = els.sourcePicker.value;
+    // Pre-fill batch name from the folder's basename if still empty.
+    const nameInput = els.importForm.querySelector('input[name="name"]');
+    if (!nameInput.value) {
+      const basename = els.sourcePicker.value.replace(/[\\\/]$/, '').split(/[\\\/]/).pop() || '';
+      nameInput.value = basename.replace(/[^A-Za-z0-9 _\-]/g, '-');
+    }
+  }
+});
 els.refresh.addEventListener('click', loadBatches);
 els.saveSettings.addEventListener('click', saveSettings);
 els.reloadSettings.addEventListener('click', loadSettings);
