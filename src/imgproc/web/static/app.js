@@ -260,7 +260,7 @@ async function loadSettings() {
 
 function renderSettings(cfg) {
   els.settings.innerHTML = '';
-  const everyday = makeSection('Everyday settings');
+  const everyday = makeSection('Everyday settings', { collapsible: true, collapsed: false });
   for (const f of EVERYDAY_FIELDS) everyday.body.appendChild(renderField(f, cfg));
   els.settings.appendChild(everyday.section);
 
