@@ -16,6 +16,8 @@ dependencies = [
     "jinja2>=3.1",
     "fastapi>=0.110",
     "uvicorn>=0.27",
+    "openpyxl>=3.1",
+    "imagehash>=4.3",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +29,7 @@ dev = [
 [project.scripts]
 imgproc = "imgproc.cli:main"
 imgproc-ui = "imgproc.web:run_server"
+imgproc-sort = "imgproc.ingest.sort:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
