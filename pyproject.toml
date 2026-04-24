@@ -30,6 +30,7 @@ dev = [
 imgproc = "imgproc.cli:main"
 imgproc-ui = "imgproc.web:run_server"
 imgproc-sort = "imgproc.ingest.sort:main"
+imgproc-hero = "imgproc.ingest.hero:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
