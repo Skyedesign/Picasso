@@ -5,6 +5,7 @@ const els = {
   root: document.getElementById('root'),
   batches: document.getElementById('batches'),
   newBatch: document.getElementById('new-batch'),
+  importBatch: document.getElementById('import-batch'),
   refresh: document.getElementById('refresh'),
   settings: document.getElementById('settings'),
   saveSettings: document.getElementById('save-settings'),
@@ -13,6 +14,9 @@ const els = {
   log: document.getElementById('log'),
   jobStatus: document.getElementById('job-status'),
   batchRowTpl: document.getElementById('batch-row-tpl'),
+  importDialog: document.getElementById('import-dialog'),
+  importForm: document.getElementById('import-form'),
+  importCancel: document.getElementById('import-cancel'),
 };
 
 // ─── Toast ─────────────────────────────────────────────────────────────
@@ -114,6 +118,38 @@ async function newBatch() {
     await loadBatches();
   } catch (e) {
     toast(e.message, true);
+  }
+}
+
+function openImportDialog() {
+  els.importForm.reset();
+  els.importDialog.showModal();
+}
+
+async function handleImportSubmit(e) {
+  e.preventDefault();
+  const data = new FormData(els.importForm);
+  const payload = {
+    source_path: (data.get('source_path') || '').toString().trim(),
+    name: (data.get('name') || '').toString().trim(),
+    move: data.get('move') === 'on',
+  };
+  const submitBtn = els.importForm.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Importing…';
+  try {
+    const result = await api('/api/batches/import', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    els.importDialog.close();
+    toast(`Imported ${result.imported} image${result.imported === 1 ? '' : 's'} into "${result.name}"`);
+    await loadBatches();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Import';
   }
 }
 
@@ -484,6 +520,9 @@ async function saveSettings() {
 
 // ─── Wire up ───────────────────────────────────────────────────────────
 els.newBatch.addEventListener('click', newBatch);
+els.importBatch.addEventListener('click', openImportDialog);
+els.importCancel.addEventListener('click', () => els.importDialog.close());
+els.importForm.addEventListener('submit', handleImportSubmit);
 els.refresh.addEventListener('click', loadBatches);
 els.saveSettings.addEventListener('click', saveSettings);
 els.reloadSettings.addEventListener('click', loadSettings);

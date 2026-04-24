@@ -17,6 +17,7 @@
         <h2>Batches</h2>
         <div class="section-actions">
           <button id="new-batch">+ New batch</button>
+          <button id="import-batch">Import folder</button>
           <button id="refresh">Refresh</button>
         </div>
       </div>
@@ -44,6 +45,34 @@
       <pre id="log"></pre>
     </section>
   </main>
+
+  <dialog id="import-dialog">
+    <form id="import-form">
+      <h3>Import folder into a new batch</h3>
+      <p class="dialog-hint">
+        Copy images from an existing folder (e.g. an export from Pegasus) into a new batch.
+        Only image files (.jpg, .png, .webp, .bmp) are imported; everything else is skipped.
+      </p>
+      <label class="dialog-field">
+        <span>Source folder path</span>
+        <input name="source_path" type="text" placeholder="e.g. C:\Users\alida\Downloads\bells-heroes" required autofocus>
+        <small>Tip: in Windows Explorer, right-click the folder and choose "Copy as path".</small>
+      </label>
+      <label class="dialog-field">
+        <span>New batch name</span>
+        <input name="name" type="text" placeholder="e.g. bells" required pattern="[A-Za-z0-9 _\-]+">
+        <small>Letters, numbers, dash, underscore, space.</small>
+      </label>
+      <label class="dialog-checkbox">
+        <input name="move" type="checkbox">
+        <span>Move the files instead of copying (deletes the originals)</span>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="import-cancel">Cancel</button>
+        <button type="submit" class="primary">Import</button>
+      </div>
+    </form>
+  </dialog>
 
   <template id="batch-row-tpl">
     <div class="batch-row">

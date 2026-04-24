@@ -118,6 +118,65 @@ def create_batch(body: NewBatch) -> dict:
     return {"name": name}
 
 
+class ImportRequest(BaseModel):
+    name: str
+    source_path: str
+    move: bool = False  # if True, move the source files; otherwise copy
+
+
+@app.post("/api/batches/import")
+def import_folder(body: ImportRequest) -> dict:
+    # Target: must be a fresh batch under BATCHES_ROOT.
+    name = body.name.strip()
+    if not _NAME_RE.match(name):
+        raise HTTPException(400, "name may only contain letters, numbers, dash, underscore, space")
+    target = BATCHES_ROOT / name
+    if target.exists():
+        raise HTTPException(409, "batch already exists — pick a different name")
+
+    # Source: any folder on the filesystem (read-only from our side). Strip the
+    # surrounding quotes Windows' "Copy as path" adds, and expand ~ for convenience.
+    src_str = body.source_path.strip().strip('"').strip("'")
+    if not src_str:
+        raise HTTPException(400, "source folder path is required")
+    source = Path(src_str).expanduser()
+    if not source.exists():
+        raise HTTPException(400, f"source folder not found: {source}")
+    if not source.is_dir():
+        raise HTTPException(400, f"source path is not a folder: {source}")
+
+    # Prevent importing from inside BATCHES_ROOT itself — the only legitimate case
+    # is cross-folder reorganization, which should use the existing batch-rename flow
+    # (which doesn't exist yet; ask the user before copying inside the tree).
+    try:
+        source.resolve().relative_to(BATCHES_ROOT.resolve())
+        raise HTTPException(400, "source is inside the batches folder; import from an outside location")
+    except ValueError:
+        pass  # good — source is outside BATCHES_ROOT
+
+    target.mkdir()
+    imported = 0
+    try:
+        for p in source.iterdir():
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
+                dest = target / p.name
+                if body.move:
+                    shutil.move(str(p), str(dest))
+                else:
+                    shutil.copy2(p, dest)
+                imported += 1
+    except Exception:
+        # Clean up a half-imported batch so the user isn't left with a weird state.
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+
+    if imported == 0:
+        target.rmdir()
+        raise HTTPException(400, "no image files (.jpg, .png, .webp, .bmp) found in source folder")
+
+    return {"name": name, "imported": imported, "moved": body.move}
+
+
 @app.delete("/api/batches/{name}")
 def delete_batch(name: str) -> dict:
     # Destructive — recursively removes the batch folder and everything it contains
