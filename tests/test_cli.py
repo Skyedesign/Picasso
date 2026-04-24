@@ -25,7 +25,7 @@ def test_cli_processes_folder_and_writes_outputs(folder_of_mixed: Path) -> None:
 
     # Every output must be exactly the target canvas size.
     for out in processed.glob("*.jpg"):
-        assert Image.open(out).size == (800, 600)
+        assert Image.open(out).size == (600, 800)
 
     # Report and assets.
     assert (folder_of_mixed / "report.html").exists()
@@ -53,6 +53,6 @@ def test_cli_target_ratio_override(folder_of_mixed: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     # With a forced larger target, the small circles should be upscaled where allowed.
-    # max_upscale defaults to 1.0, so the cap will kick in — but outputs must still be 800x600.
+    # max_upscale defaults to 1.0, so the cap will kick in — but outputs must still be 600x800.
     for out in (folder_of_mixed / "processed").glob("*.jpg"):
-        assert Image.open(out).size == (800, 600)
+        assert Image.open(out).size == (600, 800)

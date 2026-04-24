@@ -8,4 +8,4 @@ padding_pct: 5            # minimum breathing room (% of canvas) between product
 recenter: true            # true = recenter product via mask centroid; false = rescale only
 min_confidence: 0.8       # below this = queued for manual review instead of auto-processed
 max_upscale: 1.0          # cap on upscaling factor; 1.0 = never upscale past original
-output_canvas: [800, 600] # width, height of the output canvas (px)
+output_canvas: [600, 800] # width, height of the output canvas (px)

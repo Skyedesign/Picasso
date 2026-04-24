@@ -14,7 +14,7 @@ from ..config import Config
 from ..engine.detect import Detection
 from ..engine.stats import GroupStats
 
-_THUMB_SIZE = (320, 240)
+_THUMB_SIZE = (240, 320)
 
 
 def _bbox_overlay(detection: Detection) -> Image.Image:

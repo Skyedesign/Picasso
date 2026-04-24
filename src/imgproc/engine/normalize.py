@@ -15,7 +15,7 @@ def normalize_to_canvas(
     detection: Detection,
     *,
     target_ratio: float,
-    canvas_size: tuple[int, int] = (800, 600),
+    canvas_size: tuple[int, int] = (600, 800),
     padding_pct: float = 5.0,
     max_upscale: float = 1.0,
     recenter_on_mask_centroid: bool = True,

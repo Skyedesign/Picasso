@@ -55,11 +55,11 @@ def test_normalize_produces_canvas_at_target_ratio(synthetic_large_circle: Image
     out = normalize_to_canvas(
         det,
         target_ratio=0.1,
-        canvas_size=(800, 600),
+        canvas_size=(600, 800),
         padding_pct=5.0,
         max_upscale=1.0,
     )
-    assert out.size == (800, 600)
+    assert out.size == (600, 800)
     # Re-detect and verify the rescaled product lands near the target (within 1%).
     out_det = detect_product(Path("out"), out)
     assert abs(out_det.occupied_ratio - 0.1) < 0.02
@@ -71,10 +71,10 @@ def test_normalize_respects_max_upscale(synthetic_small_circle: Image.Image) -> 
     out = normalize_to_canvas(
         det,
         target_ratio=0.9,
-        canvas_size=(800, 600),
+        canvas_size=(600, 800),
         max_upscale=1.0,
     )
     out_det = detect_product(Path("out"), out)
     # With a 200x200 bbox on 1000x1000 source, scale=1.0 → bbox=200x200 on canvas
-    # → ratio = 200*200/(800*600) = 0.0833. Assert it didn't balloon past that.
+    # → ratio = 200*200/(600*800) = 0.0833. Assert it didn't balloon past that.
     assert out_det.occupied_ratio < 0.1

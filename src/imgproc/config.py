@@ -17,7 +17,7 @@ class Config(BaseModel):
     recenter: bool = True
     min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     max_upscale: float = Field(default=1.0, ge=1.0)
-    output_canvas: tuple[int, int] = (800, 600)
+    output_canvas: tuple[int, int] = (600, 800)
 
     @field_validator("target_ratio")
     @classmethod
