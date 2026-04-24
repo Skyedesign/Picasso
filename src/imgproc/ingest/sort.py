@@ -167,13 +167,35 @@ def main(source: Path, xlsx_dir: Path | None, threshold: int, apply: bool) -> No
         return
 
     click.echo("\nMoving files...")
+    renames_preview: list[tuple[str, str]] = []
     for cat in ("flowers", "bells", "serviettes"):
         if not plan[cat]:
             continue
         target = source / cat
         target.mkdir(exist_ok=True)
-        for p, _sku, _dist in plan[cat]:
-            shutil.move(str(p), str(target / p.name))
+        # Group matches by SKU, sort each group by Hamming distance (closest first),
+        # then rename: best → "SKU.ext", others → "SKU-1.ext", "SKU-2.ext", ...
+        by_sku: dict[str, list[tuple[Path, int]]] = {}
+        for p, sku, dist in plan[cat]:
+            by_sku.setdefault(sku, []).append((p, dist))
+        for sku, entries in by_sku.items():
+            entries.sort(key=lambda e: e[1])  # closest match first
+            for rank, (p, _) in enumerate(entries):
+                suffix = "" if rank == 0 else f"-{rank}"
+                new_name = f"{sku}{suffix}{p.suffix.lower()}"
+                dest = target / new_name
+                # Guard against the very rare case where two extensions collide (e.g.
+                # both .jpg and .webp matched the same SKU at the same rank). Fall back
+                # to keeping the hash stem.
+                if dest.exists():
+                    dest = target / f"{sku}{suffix}-{p.stem[:8]}{p.suffix.lower()}"
+                shutil.move(str(p), str(dest))
+                renames_preview.append((p.name, f"{cat}/{dest.name}"))
+    # Print the first few renames as a sanity check, then summary counts.
+    for old, new in renames_preview[:6]:
+        click.echo(f"  {old}  ->  {new}")
+    if len(renames_preview) > 6:
+        click.echo(f"  ...and {len(renames_preview) - 6} more")
     click.echo("Done.")
 
 
