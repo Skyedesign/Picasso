@@ -14,6 +14,8 @@ dependencies = [
     "PyYAML>=6.0",
     "click>=8.1",
     "jinja2>=3.1",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -24,12 +26,13 @@ dev = [
 
 [project.scripts]
 imgproc = "imgproc.cli:main"
+imgproc-ui = "imgproc.web:run_server"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-imgproc = ["report/template.html.j2"]
+imgproc = ["report/template.html.j2", "web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
