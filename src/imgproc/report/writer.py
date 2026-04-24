@@ -47,7 +47,7 @@ def _thumb(src: Path | Image.Image) -> Image.Image:
 def write_report(
     folder: Path,
     detections: Sequence[Detection],
-    stats: GroupStats,
+    stats: GroupStats | None,
     rows: list[dict],
     cfg: Config,
 ) -> Path:
@@ -65,9 +65,14 @@ def write_report(
         before.save(before_path, quality=82)
         row["before_thumb"] = f"_report_assets/{before_path.name}"
 
-        # "After" is the processed output if we made one, otherwise the original
-        # (so review-queued images still have something to show side-by-side).
-        if row["output_path"] and row["status"] != "review":
+        # "After" is the processed output if we made one (processed/ only), otherwise
+        # the original (so review/skipped images still have something side-by-side).
+        show_after = (
+            row["output_path"]
+            and row["status"] != "review"
+            and not row["status"].startswith("skipped")
+        )
+        if show_after:
             after = _thumb(Path(row["output_path"]))
         else:
             after = _thumb(det.image)
@@ -75,9 +80,15 @@ def write_report(
         after.save(after_path, quality=82)
         row["after_thumb"] = f"_report_assets/{after_path.name}"
 
-    counts = Counter(r["status"] for r in rows)
-    # Ensure all expected keys exist in the template's `counts` dict.
-    for k in ("within-tolerance", "outlier", "review"):
+    # Group "skipped-*" statuses under a single "skipped" bucket for display; keep
+    # the specific reason available for the per-card badge.
+    counts = Counter()
+    for r in rows:
+        if r["status"].startswith("skipped"):
+            counts["skipped"] += 1
+        else:
+            counts[r["status"]] += 1
+    for k in ("within-tolerance", "outlier", "review", "skipped"):
         counts.setdefault(k, 0)
 
     template_dir = Path(__file__).parent

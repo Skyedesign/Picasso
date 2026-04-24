@@ -40,3 +40,20 @@ def folder_of_mixed(tmp_path: Path) -> Path:
         _make_circle((1000, 1000), bbox).save(d / f"small_{i}.jpg")
     _make_circle((1000, 1000), (100, 100, 900, 900), (50, 120, 200)).save(d / "huge.jpg")
     return d
+
+
+@pytest.fixture
+def folder_with_lifestyle(tmp_path: Path) -> Path:
+    """A folder with two clean-white heroes and one 'lifestyle' image with noisy
+    background (painted full-bleed so corner sampling picks up non-white pixels)."""
+    d = tmp_path / "with_lifestyle"
+    d.mkdir()
+    _make_circle((1000, 1000), (400, 400, 600, 600)).save(d / "hero_a.jpg")
+    _make_circle((1000, 1000), (390, 390, 610, 610)).save(d / "hero_b.jpg")
+
+    # "Lifestyle" — fill the whole canvas with a mid-tone colour so corner purity
+    # collapses to 0 (no corner pixel meets the white threshold).
+    lifestyle = Image.new("RGB", (1000, 1000), (150, 120, 100))
+    ImageDraw.Draw(lifestyle).ellipse((400, 400, 600, 600), fill=(200, 50, 50))
+    lifestyle.save(d / "lifestyle.jpg")
+    return d

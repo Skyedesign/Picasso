@@ -70,6 +70,7 @@
     .badge.within-tolerance { background: #e8f5e9; color: var(--ok); }
     .badge.outlier { background: #fff3e0; color: var(--warn); }
     .badge.review { background: #ffebee; color: var(--bad); }
+    .badge.skipped { background: #eceff1; color: #546e7a; }
     .metrics {
       margin-top: 6px; color: var(--muted); font-size: 11px;
       display: flex; gap: 10px; flex-wrap: wrap;
@@ -87,14 +88,21 @@
 <body>
   <header>
     <h1>imgproc report — <code>{{ folder_name }}</code></h1>
-    <div class="subtitle">Generated {{ timestamp }} · target ratio {{ "%.3f"|format(stats.target_ratio) }} · canvas {{ canvas[0] }}×{{ canvas[1] }}</div>
+    <div class="subtitle">
+      Generated {{ timestamp }}
+      {% if stats %}· target ratio {{ "%.3f"|format(stats.target_ratio) }}{% endif %}
+      · canvas {{ canvas[0] }}×{{ canvas[1] }}
+    </div>
     <div class="stats">
       <div class="stat">Total: <b>{{ rows|length }}</b></div>
-      <div class="stat">Median ratio: <b>{{ "%.3f"|format(stats.median_ratio) }}</b></div>
-      <div class="stat">MAD: <b>{{ "%.3f"|format(stats.mad) }}</b></div>
-      <div class="stat">Tolerance bounds: <b>{{ "%.3f"|format(stats.lower_bound) }}</b> – <b>{{ "%.3f"|format(stats.upper_bound) }}</b></div>
+      {% if stats %}
+        <div class="stat">Median ratio: <b>{{ "%.3f"|format(stats.median_ratio) }}</b></div>
+        <div class="stat">MAD: <b>{{ "%.3f"|format(stats.mad) }}</b></div>
+        <div class="stat">Tolerance bounds: <b>{{ "%.3f"|format(stats.lower_bound) }}</b> – <b>{{ "%.3f"|format(stats.upper_bound) }}</b></div>
+      {% endif %}
       <div class="stat">Outliers (rescaled): <b>{{ counts.outlier }}</b></div>
       <div class="stat">Review queue: <b>{{ counts.review }}</b></div>
+      <div class="stat">Skipped (filtered): <b>{{ counts.skipped }}</b></div>
     </div>
   </header>
   <div class="filters">
@@ -102,24 +110,31 @@
     <label><input type="checkbox" class="filter" value="within-tolerance" checked> Within tolerance</label>
     <label><input type="checkbox" class="filter" value="outlier" checked> Outliers</label>
     <label><input type="checkbox" class="filter" value="review" checked> Review queue</label>
+    <label><input type="checkbox" class="filter" value="skipped" checked> Skipped (filtered)</label>
   </div>
   <main>
     <div class="grid" id="grid">
       {% for row in rows %}
-      <div class="card" data-status="{{ row.status }}">
+      {% set status_class = 'skipped' if row.status.startswith('skipped') else row.status %}
+      <div class="card" data-status="{{ status_class }}">
         <div class="card-imgs">
           <div class="card-img-wrap">
             <span class="img-label">before (bbox)</span>
             <img src="{{ row.before_thumb }}" alt="before">
           </div>
           <div class="card-img-wrap">
-            <span class="img-label">{% if row.status == 'review' %}skipped{% else %}after{% endif %}</span>
+            <span class="img-label">
+              {%- if row.status == 'review' -%}not processed
+              {%- elif row.status.startswith('skipped') -%}skipped
+              {%- else -%}after
+              {%- endif -%}
+            </span>
             <img src="{{ row.after_thumb }}" alt="after">
           </div>
         </div>
         <div class="card-body">
           <div class="card-name">{{ row.name }}</div>
-          <span class="badge {{ row.status }}">{{ row.status.replace('-', ' ') }}</span>
+          <span class="badge {{ status_class }}">{{ row.status.replace('-', ' ') }}</span>
           <div class="metrics">
             <span>ratio: <b>{{ "%.3f"|format(row.occupied_ratio) }}</b></span>
             <span>conf: <b>{{ "%.2f"|format(row.confidence) }}</b></span>

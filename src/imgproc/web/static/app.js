@@ -295,6 +295,27 @@ const EVERYDAY_FIELDS = [
       { value: 0.9, label: 'Strict — send any slightly uncertain image to Review' },
     ],
   },
+  {
+    key: 'skip_lifestyle',
+    label: 'Skip lifestyle / non-white-background images',
+    hint: 'Images that aren\'t on a clean white background (e.g. product-in-scene photos) get copied into a separate "Skipped" folder instead of being processed, so they don\'t affect the size calculations for the rest of the group.',
+    type: 'choice',
+    options: [
+      { value: true,  label: 'Yes — skip them (recommended)' },
+      { value: false, label: 'No — try to process everything' },
+    ],
+  },
+  {
+    key: 'lifestyle_bg_threshold',
+    label: 'How white must the background be to count as "clean"?',
+    hint: 'Images where fewer than this fraction of the corner pixels are near-white get tagged as lifestyle and skipped. Only applies when the above is turned on.',
+    type: 'preset',
+    presets: [
+      { value: 0.70, label: 'Loose — only skip obvious scene shots' },
+      { value: 0.85, label: 'Balanced (recommended)' },
+      { value: 0.95, label: 'Strict — require very clean corners' },
+    ],
+  },
 ];
 
 const ADVANCED_FIELDS = [

@@ -96,28 +96,69 @@ def main(
         click.echo("No images could be processed.", err=True)
         sys.exit(1)
 
+    # ─── Filter pass ────────────────────────────────────────────────────
+    # Each filter tags an image with a skip reason or leaves it as a candidate.
+    # Skip decisions happen BEFORE group stats so lifestyle shots don't drag
+    # the median toward huge-"product" scenes.
+    skipped: list[tuple[Detection, str]] = []  # (detection, reason)
+    candidates: list[Detection] = []
+    for det in detections:
+        reason: str | None = None
+        if cfg.skip_lifestyle and det.bg.purity < cfg.lifestyle_bg_threshold:
+            reason = "lifestyle-bg"
+        if reason:
+            skipped.append((det, reason))
+        else:
+            candidates.append(det)
+
+    if not candidates:
+        click.echo("All images were filtered out — nothing to process.", err=True)
+
     target_override = None if cfg.target_ratio == "auto" else float(cfg.target_ratio)
     stats = compute_group_stats(
-        detections,
+        candidates,
         tolerance_mad=cfg.tolerance_mad,
         target_override=target_override,
-    )
+    ) if candidates else None
 
-    click.echo(
-        f"  group median occupied ratio: {stats.median_ratio:.3f} "
-        f"(MAD {stats.mad:.3f}, bounds {stats.lower_bound:.3f}–{stats.upper_bound:.3f})"
-    )
+    if stats:
+        click.echo(
+            f"  group median occupied ratio: {stats.median_ratio:.3f} "
+            f"(MAD {stats.mad:.3f}, bounds {stats.lower_bound:.3f}–{stats.upper_bound:.3f})"
+        )
 
     processed_dir = folder / "processed"
     review_dir = folder / "review"
+    skipped_dir = folder / "skipped"
     if not dry_run:
         processed_dir.mkdir(exist_ok=True)
         review_dir.mkdir(exist_ok=True)
+        if skipped:
+            skipped_dir.mkdir(exist_ok=True)
 
     report_rows = []
-    n_processed = n_reviewed = n_outliers = 0
-    for det in detections:
-        outlier = is_outlier(det, stats)
+    n_processed = n_reviewed = n_outliers = n_skipped = 0
+
+    # Skipped images first — unchanged copy, with the reason recorded.
+    for det, reason in skipped:
+        n_skipped += 1
+        output_path = None
+        if not dry_run:
+            output_path = skipped_dir / det.source_path.name
+            shutil.copy2(det.source_path, output_path)
+        report_rows.append({
+            "name": det.source_path.name,
+            "status": f"skipped-{reason}",
+            "occupied_ratio": det.occupied_ratio,
+            "confidence": det.confidence,
+            "bg_is_white": det.bg.is_white,
+            "bg_purity": det.bg.purity,
+            "output_path": output_path,
+        })
+
+    # Then the candidates — processed or sent to review.
+    for det in candidates:
+        outlier = is_outlier(det, stats) if stats else False
         low_conf = det.confidence < cfg.min_confidence
         status: str
         output_path: Path | None = None
@@ -157,7 +198,7 @@ def main(
 
     click.echo(
         f"  processed: {n_processed} (of which {n_outliers} rescaled as outliers), "
-        f"review: {n_reviewed}"
+        f"review: {n_reviewed}, skipped: {n_skipped}"
     )
 
     if not dry_run:

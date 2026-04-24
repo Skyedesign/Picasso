@@ -44,6 +44,27 @@ def test_cli_dry_run_writes_no_files(folder_of_mixed: Path) -> None:
     assert not (folder_of_mixed / "report.html").exists()
 
 
+def test_cli_skips_lifestyle_images(folder_with_lifestyle: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [str(folder_with_lifestyle), "--no-open-report"],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+
+    # Heroes get processed, lifestyle image lands in skipped/ untouched.
+    processed = folder_with_lifestyle / "processed"
+    skipped = folder_with_lifestyle / "skipped"
+    assert sorted(p.name for p in processed.glob("*.jpg")) == ["hero_a.jpg", "hero_b.jpg"]
+    assert [p.name for p in skipped.glob("*.jpg")] == ["lifestyle.jpg"]
+
+    # The skipped image should be byte-identical to the source (it was copied, not
+    # regenerated as a canvas output).
+    src_bytes = (folder_with_lifestyle / "lifestyle.jpg").read_bytes()
+    assert (skipped / "lifestyle.jpg").read_bytes() == src_bytes
+
+
 def test_cli_target_ratio_override(folder_of_mixed: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(

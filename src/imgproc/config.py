@@ -18,6 +18,11 @@ class Config(BaseModel):
     min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     max_upscale: float = Field(default=1.0, ge=1.0)
     output_canvas: tuple[int, int] = (600, 800)
+    # Filters — each is a bool toggle + any parameters it needs. Images that match
+    # a filter are copied (unchanged) into a `skipped/` folder with a reason tag
+    # so Alida can eyeball why they were excluded.
+    skip_lifestyle: bool = True
+    lifestyle_bg_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
 
     @field_validator("target_ratio")
     @classmethod

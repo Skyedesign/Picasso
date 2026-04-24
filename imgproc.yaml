@@ -8,3 +8,7 @@ max_upscale: 1.2
 output_canvas:
 - 600
 - 800
+# Filters — images matching these get copied into skipped/ with a reason tag,
+# not processed and not sent to review.
+skip_lifestyle: true
+lifestyle_bg_threshold: 0.85
