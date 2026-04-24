@@ -99,10 +99,21 @@ def _load_anchors(xlsx_dir: Path) -> dict[str, tuple[imagehash.ImageHash, str]]:
     help="Directory containing the category xlsx files. Defaults to SOURCE's parent.",
 )
 @click.option("--threshold", type=int, default=10, show_default=True,
-              help="Max Hamming distance for a confident match (0-64).")
+              help="Strict: accept any match at or below this Hamming distance.")
+@click.option("--loose-threshold", type=int, default=18, show_default=True,
+              help="Loose: also accept up to this distance IF separation from #2 match is large.")
+@click.option("--min-margin", type=int, default=4, show_default=True,
+              help="Required gap between #1 and #2 match for a loose accept.")
 @click.option("--apply/--dry-run", default=False,
               help="Actually move files. Default is dry-run (preview only).")
-def main(source: Path, xlsx_dir: Path | None, threshold: int, apply: bool) -> None:
+def main(
+    source: Path,
+    xlsx_dir: Path | None,
+    threshold: int,
+    loose_threshold: int,
+    min_margin: int,
+    apply: bool,
+) -> None:
     """Sort hash-named images in SOURCE into category subfolders (flowers/, bells/,
     serviettes/) based on their best xlsx-anchor match.
 
@@ -137,6 +148,7 @@ def main(source: Path, xlsx_dir: Path | None, threshold: int, apply: bool) -> No
     plan: dict[str, list[tuple[Path, str, int]]] = {
         "flowers": [], "bells": [], "serviettes": [], "unmatched": [],
     }
+    n_strict = n_margin = 0
     for p in image_paths:
         try:
             img = Image.open(p).convert("RGB")
@@ -145,22 +157,32 @@ def main(source: Path, xlsx_dir: Path | None, threshold: int, apply: bool) -> No
         except Exception as e:
             click.echo(f"  skip {p.name}: {e}", err=True)
             continue
-        best_dist = 999
-        best_cat: str | None = None
-        best_sku: str | None = None
-        for sku, (ah, cat) in anchors.items():
-            d = h - ah
-            if d < best_dist:
-                best_dist, best_cat, best_sku = d, cat, sku
-        if best_cat and best_dist <= threshold:
-            plan[best_cat].append((p, best_sku or "?", best_dist))
+        # Collect all distances so we can check the #1/#2 separation margin.
+        dists = sorted((h - ah, sku, cat) for sku, (ah, cat) in anchors.items())
+        top1_dist, top1_sku, top1_cat = dists[0]
+        top2_dist = dists[1][0] if len(dists) > 1 else 999
+
+        strict = top1_dist <= threshold
+        # Loose: further than strict but still plausible, AND clearly separated from
+        # the next candidate. The margin guards against noise-floor false positives.
+        margin_ok = (
+            top1_dist <= loose_threshold
+            and (top2_dist - top1_dist) >= min_margin
+        )
+        if strict:
+            plan[top1_cat].append((p, top1_sku, top1_dist))
+            n_strict += 1
+        elif margin_ok:
+            plan[top1_cat].append((p, top1_sku, top1_dist))
+            n_margin += 1
         else:
-            plan["unmatched"].append((p, best_sku or "?", best_dist))
+            plan["unmatched"].append((p, top1_sku, top1_dist))
 
     click.echo("\nSort plan:")
     for cat in ("flowers", "bells", "serviettes"):
         click.echo(f"  {cat:12s}: {len(plan[cat])}")
     click.echo(f"  unmatched   : {len(plan['unmatched'])} (will stay in place)")
+    click.echo(f"  (of matches: {n_strict} strict + {n_margin} via separation margin)")
 
     if not apply:
         click.echo("\n(dry-run — re-run with --apply to actually move files)")
