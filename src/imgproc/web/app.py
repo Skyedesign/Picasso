@@ -27,8 +27,11 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from PIL import Image
+
 from ..cli import IMAGE_EXTS, main as cli_main
 from ..config import Config, find_project_root
+from ..engine.background import detect_background
 
 STATIC = Path(__file__).parent / "static"
 _PROJECT_ROOT = find_project_root()
@@ -193,8 +196,13 @@ def import_folder(body: ImportRequest) -> dict:
     except ValueError:
         pass  # good — source is outside BATCHES_ROOT
 
+    # Threshold matches the lifestyle filter default — anything below this will be
+    # routed to skipped/ at process time, so flagging it now lets Alida pre-cull.
+    non_white_threshold = 0.85
+
     target.mkdir()
     imported = 0
+    non_white: list[str] = []
     try:
         for p in source.iterdir():
             if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
@@ -204,6 +212,14 @@ def import_folder(body: ImportRequest) -> dict:
                 else:
                     shutil.copy2(p, dest)
                 imported += 1
+                # Check the copied file's background. Cheap — samples 4 corners only.
+                try:
+                    with Image.open(dest) as img:
+                        bg = detect_background(img)
+                        if bg.purity < non_white_threshold:
+                            non_white.append(p.name)
+                except Exception:
+                    pass  # skip malformed images silently — they'll surface at process time
     except Exception:
         # Clean up a half-imported batch so the user isn't left with a weird state.
         shutil.rmtree(target, ignore_errors=True)
@@ -213,7 +229,13 @@ def import_folder(body: ImportRequest) -> dict:
         target.rmdir()
         raise HTTPException(400, "no image files (.jpg, .png, .webp, .bmp) found in source folder")
 
-    return {"name": name, "imported": imported, "moved": body.move}
+    return {
+        "name": name,
+        "imported": imported,
+        "moved": body.move,
+        "non_white_count": len(non_white),
+        "non_white_files": non_white,
+    }
 
 
 @app.delete("/api/batches/{name}")

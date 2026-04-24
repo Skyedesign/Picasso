@@ -171,7 +171,21 @@ async function handleImportSubmit(e) {
       body: JSON.stringify(payload),
     });
     els.importDialog.close();
-    toast(`Imported ${result.imported} image${result.imported === 1 ? '' : 's'} into "${result.name}"`);
+
+    const summary = result.non_white_count
+      ? `Imported ${result.imported} — ${result.non_white_count} have non-white backgrounds`
+      : `Imported ${result.imported} image${result.imported === 1 ? '' : 's'} into "${result.name}"`;
+    toast(summary);
+
+    if (result.non_white_count > 0) {
+      const names = result.non_white_files.join('\n');
+      const were = result.non_white_count === 1 ? 'image has a non-white background' : 'images have non-white backgrounds';
+      alert(
+        `${result.non_white_count} of the ${result.imported} imported ${were}:\n\n${names}\n\n` +
+        `These will be routed to "skipped/" at process time. Use "Open folder" to review or remove them first if you'd like.`
+      );
+    }
+
     await loadBatches();
   } catch (err) {
     toast(err.message, true);
