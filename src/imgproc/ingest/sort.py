@@ -9,6 +9,8 @@ the category, so:
     2026 CHRISTMAS PAPER SERVIETTES.xlsx -> serviettes/
 
 Images whose best anchor match exceeds the Hamming threshold stay in place.
+When multiple source images match the same SKU, only the closest match is
+moved (renamed to SKU.ext); the rest stay in place for manual review.
 
 Dry-run by default; pass --apply to actually move files.
 """
@@ -178,9 +180,28 @@ def main(
         else:
             plan["unmatched"].append((p, top1_sku, top1_dist))
 
+    # Per SKU, the closest-match image is the hero; any additional matches are
+    # "extras" (usually lifestyle/packaging shots of the same product) and stay
+    # in place, so the category folder ends up with one clean image per SKU.
+    heroes_by_cat: dict[str, list[tuple[Path, str, int]]] = {
+        "flowers": [], "bells": [], "serviettes": [],
+    }
+    n_extras_by_cat: dict[str, int] = {"flowers": 0, "bells": 0, "serviettes": 0}
+    for cat in ("flowers", "bells", "serviettes"):
+        by_sku: dict[str, list[tuple[Path, int]]] = {}
+        for p, sku, dist in plan[cat]:
+            by_sku.setdefault(sku, []).append((p, dist))
+        for sku, entries in by_sku.items():
+            entries.sort(key=lambda e: e[1])
+            hero_p, hero_dist = entries[0]
+            heroes_by_cat[cat].append((hero_p, sku, hero_dist))
+            n_extras_by_cat[cat] += len(entries) - 1
+
     click.echo("\nSort plan:")
     for cat in ("flowers", "bells", "serviettes"):
-        click.echo(f"  {cat:12s}: {len(plan[cat])}")
+        extras = n_extras_by_cat[cat]
+        extra_note = f" (+{extras} extras left in place)" if extras else ""
+        click.echo(f"  {cat:12s}: {len(heroes_by_cat[cat])}{extra_note}")
     click.echo(f"  unmatched   : {len(plan['unmatched'])} (will stay in place)")
     click.echo(f"  (of matches: {n_strict} strict + {n_margin} via separation margin)")
 
@@ -191,28 +212,19 @@ def main(
     click.echo("\nMoving files...")
     renames_preview: list[tuple[str, str]] = []
     for cat in ("flowers", "bells", "serviettes"):
-        if not plan[cat]:
+        if not heroes_by_cat[cat]:
             continue
         target = source / cat
         target.mkdir(exist_ok=True)
-        # Group matches by SKU, sort each group by Hamming distance (closest first),
-        # then rename: best → "SKU.ext", others → "SKU-1.ext", "SKU-2.ext", ...
-        by_sku: dict[str, list[tuple[Path, int]]] = {}
-        for p, sku, dist in plan[cat]:
-            by_sku.setdefault(sku, []).append((p, dist))
-        for sku, entries in by_sku.items():
-            entries.sort(key=lambda e: e[1])  # closest match first
-            for rank, (p, _) in enumerate(entries):
-                suffix = "" if rank == 0 else f"-{rank}"
-                new_name = f"{sku}{suffix}{p.suffix.lower()}"
-                dest = target / new_name
-                # Guard against the very rare case where two extensions collide (e.g.
-                # both .jpg and .webp matched the same SKU at the same rank). Fall back
-                # to keeping the hash stem.
-                if dest.exists():
-                    dest = target / f"{sku}{suffix}-{p.stem[:8]}{p.suffix.lower()}"
-                shutil.move(str(p), str(dest))
-                renames_preview.append((p.name, f"{cat}/{dest.name}"))
+        for p, sku, _ in heroes_by_cat[cat]:
+            new_name = f"{sku}{p.suffix.lower()}"
+            dest = target / new_name
+            # Collision is unlikely now that only one file per SKU moves, but a
+            # prior --apply run could have left SKU.ext in place already.
+            if dest.exists():
+                dest = target / f"{sku}-{p.stem[:8]}{p.suffix.lower()}"
+            shutil.move(str(p), str(dest))
+            renames_preview.append((p.name, f"{cat}/{dest.name}"))
     # Print the first few renames as a sanity check, then summary counts.
     for old, new in renames_preview[:6]:
         click.echo(f"  {old}  ->  {new}")
