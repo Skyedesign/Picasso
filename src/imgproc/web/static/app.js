@@ -99,6 +99,7 @@ function renderBatches(batches) {
       });
     }
     row.querySelector('.btn-process').addEventListener('click', () => processBatch(b.name));
+    row.querySelector('.btn-remove').addEventListener('click', () => removeBatch(b));
 
     els.batches.appendChild(row);
   }
@@ -121,6 +122,24 @@ async function openBatch(name) {
     await api(`/api/batches/${encodeURIComponent(name)}/open`, { method: 'POST' });
   } catch (e) {
     toast(e.message, true);
+  }
+}
+
+async function removeBatch(b) {
+  // Intentionally explicit — deleting a batch wipes originals, processed/, review/,
+  // and the QA report. No undo; user data lives outside this tool.
+  const totalImgs = b.image_count + (b.processed_count || 0) + (b.review_count || 0);
+  const detail = totalImgs
+    ? `\n\nThis will permanently delete ${totalImgs} file${totalImgs === 1 ? '' : 's'} in the folder.`
+    : '';
+  const ok = confirm(`Remove batch "${b.name}"?${detail}\n\nThis cannot be undone.`);
+  if (!ok) return;
+  try {
+    await api(`/api/batches/${encodeURIComponent(b.name)}`, { method: 'DELETE' });
+    toast(`Removed "${b.name}"`);
+    await loadBatches();
+  } catch (e) {
+    toast(`Remove failed: ${e.message}`, true);
   }
 }
 

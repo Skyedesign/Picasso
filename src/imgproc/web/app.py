@@ -11,6 +11,7 @@ the resolved path stays inside `BATCHES_ROOT`. No path traversal.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -115,6 +116,16 @@ def create_batch(body: NewBatch) -> dict:
         raise HTTPException(409, "batch already exists")
     target.mkdir()
     return {"name": name}
+
+
+@app.delete("/api/batches/{name}")
+def delete_batch(name: str) -> dict:
+    # Destructive — recursively removes the batch folder and everything it contains
+    # (originals, processed/, review/, report, assets). The `_resolve_batch` helper
+    # ensures `name` can't escape BATCHES_ROOT via path traversal.
+    folder = _resolve_batch(name)
+    shutil.rmtree(folder)
+    return {"ok": True, "deleted": name}
 
 
 @app.post("/api/batches/{name}/open")

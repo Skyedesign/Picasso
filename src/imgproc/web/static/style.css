@@ -105,6 +105,15 @@ button.primary:hover { background: var(--accent-hover); border-color: var(--acce
 
 button.secondary { color: var(--muted); }
 
+button.danger {
+  color: var(--bad);
+  border-color: var(--border);
+}
+button.danger:hover {
+  background: #fef2f2;
+  border-color: var(--bad);
+}
+
 .batches-list { padding: 8px; }
 .batches-list .empty {
   padding: 32px;
