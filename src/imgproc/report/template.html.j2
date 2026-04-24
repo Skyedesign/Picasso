@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>imgproc report — {{ folder_name }}</title>
+  <style>
+    :root {
+      --ok: #2e7d32;
+      --warn: #ed6c02;
+      --bad: #c62828;
+      --muted: #666;
+      --border: #e0e0e0;
+      --bg: #fafafa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: #222;
+    }
+    header {
+      padding: 24px 32px;
+      background: white;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    .subtitle { color: var(--muted); font-size: 13px; }
+    .stats {
+      display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap;
+    }
+    .stat {
+      background: var(--bg); padding: 8px 12px; border-radius: 6px;
+      border: 1px solid var(--border); font-size: 13px;
+    }
+    .stat b { color: #111; }
+    .filters {
+      padding: 12px 32px; background: white;
+      border-bottom: 1px solid var(--border);
+      display: flex; gap: 16px; align-items: center;
+    }
+    .filters label { font-size: 13px; }
+    main { padding: 24px 32px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: white; border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden;
+    }
+    .card-imgs {
+      display: grid; grid-template-columns: 1fr 1fr;
+      background: #f0f0f0;
+    }
+    .card-imgs img {
+      width: 100%; aspect-ratio: 4/3; object-fit: contain;
+      background: white; display: block;
+    }
+    .card-body { padding: 10px 12px; font-size: 12px; }
+    .card-name {
+      font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+      color: #333; word-break: break-all; margin-bottom: 6px;
+    }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+    }
+    .badge.within-tolerance { background: #e8f5e9; color: var(--ok); }
+    .badge.outlier { background: #fff3e0; color: var(--warn); }
+    .badge.review { background: #ffebee; color: var(--bad); }
+    .metrics {
+      margin-top: 6px; color: var(--muted); font-size: 11px;
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .metrics span b { color: #111; font-weight: 600; }
+    .card.hidden { display: none; }
+    .img-label {
+      font-size: 10px; text-transform: uppercase; color: var(--muted);
+      padding: 4px 8px; background: rgba(255,255,255,0.9);
+      position: absolute; letter-spacing: 0.5px;
+    }
+    .card-img-wrap { position: relative; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>imgproc report — <code>{{ folder_name }}</code></h1>
+    <div class="subtitle">Generated {{ timestamp }} · target ratio {{ "%.3f"|format(stats.target_ratio) }} · canvas {{ canvas[0] }}×{{ canvas[1] }}</div>
+    <div class="stats">
+      <div class="stat">Total: <b>{{ rows|length }}</b></div>
+      <div class="stat">Median ratio: <b>{{ "%.3f"|format(stats.median_ratio) }}</b></div>
+      <div class="stat">MAD: <b>{{ "%.3f"|format(stats.mad) }}</b></div>
+      <div class="stat">Tolerance bounds: <b>{{ "%.3f"|format(stats.lower_bound) }}</b> – <b>{{ "%.3f"|format(stats.upper_bound) }}</b></div>
+      <div class="stat">Outliers (rescaled): <b>{{ counts.outlier }}</b></div>
+      <div class="stat">Review queue: <b>{{ counts.review }}</b></div>
+    </div>
+  </header>
+  <div class="filters">
+    <strong style="font-size:13px;">Show:</strong>
+    <label><input type="checkbox" class="filter" value="within-tolerance" checked> Within tolerance</label>
+    <label><input type="checkbox" class="filter" value="outlier" checked> Outliers</label>
+    <label><input type="checkbox" class="filter" value="review" checked> Review queue</label>
+  </div>
+  <main>
+    <div class="grid" id="grid">
+      {% for row in rows %}
+      <div class="card" data-status="{{ row.status }}">
+        <div class="card-imgs">
+          <div class="card-img-wrap">
+            <span class="img-label">before (bbox)</span>
+            <img src="{{ row.before_thumb }}" alt="before">
+          </div>
+          <div class="card-img-wrap">
+            <span class="img-label">{% if row.status == 'review' %}skipped{% else %}after{% endif %}</span>
+            <img src="{{ row.after_thumb }}" alt="after">
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="card-name">{{ row.name }}</div>
+          <span class="badge {{ row.status }}">{{ row.status.replace('-', ' ') }}</span>
+          <div class="metrics">
+            <span>ratio: <b>{{ "%.3f"|format(row.occupied_ratio) }}</b></span>
+            <span>conf: <b>{{ "%.2f"|format(row.confidence) }}</b></span>
+            <span>bg: <b>{% if row.bg_is_white %}white{% else %}off-white{% endif %}</b> ({{ "%.2f"|format(row.bg_purity) }})</span>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </main>
+  <script>
+    const filters = document.querySelectorAll('.filter');
+    const cards = document.querySelectorAll('.card');
+    function apply() {
+      const active = new Set(
+        Array.from(filters).filter(f => f.checked).map(f => f.value)
+      );
+      cards.forEach(c => {
+        c.classList.toggle('hidden', !active.has(c.dataset.status));
+      });
+    }
+    filters.forEach(f => f.addEventListener('change', apply));
+  </script>
+</body>
+</html>
