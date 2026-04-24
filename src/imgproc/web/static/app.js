@@ -173,15 +173,78 @@ function setJobStatus(status, text) {
 }
 
 // ─── Settings ──────────────────────────────────────────────────────────
-const FIELDS = [
-  { key: 'tolerance_mad',  type: 'number', step: 0.1,   hint: 'Outlier threshold (MAD multiplier).' },
-  { key: 'target_ratio',   type: 'ratio',                hint: '"auto" = use group median, or a number 0-1.' },
-  { key: 'bg_threshold',   type: 'number', step: 1,     hint: 'Background detection RGB threshold (0-255).' },
-  { key: 'padding_pct',    type: 'number', step: 0.5,   hint: 'Min breathing room between product and canvas edge (%).' },
-  { key: 'min_confidence', type: 'number', step: 0.05,  hint: 'Below this, images go to review/ instead of processed/.' },
-  { key: 'max_upscale',    type: 'number', step: 0.05,  hint: 'Cap on upscaling factor. 1.0 = never upscale.' },
-  { key: 'recenter',       type: 'bool',                 hint: 'Center on mask centroid (true) or bbox geometric center (false).' },
-  { key: 'output_canvas',  type: 'canvas',               hint: 'Output canvas size (width × height).' },
+// Field definitions use plain-English labels & hints. Internal keys match the
+// pydantic Config schema so the save payload is unchanged.
+const EVERYDAY_FIELDS = [
+  {
+    key: 'target_ratio',
+    label: 'How big should products appear in the frame?',
+    hint: 'Products are resized so they all fill a similar amount of the frame. "Match the group" uses whichever size is most common across the images you\'re processing.',
+    type: 'ratio_choice',
+  },
+  {
+    key: 'max_upscale',
+    label: 'Can small products be enlarged to match the group?',
+    hint: 'If a product is smaller than the target size, it can be made a bit bigger so it doesn\'t look out of place. Large enlargements can make edges slightly soft.',
+    type: 'preset',
+    presets: [
+      { value: 1.0, label: 'No — keep original size' },
+      { value: 1.2, label: 'A little — up to 1.2× (recommended)' },
+      { value: 1.5, label: 'Moderate — up to 1.5×' },
+      { value: 2.0, label: 'A lot — up to 2× (softer edges)' },
+    ],
+  },
+  {
+    key: 'padding_pct',
+    label: 'White space around each product',
+    hint: 'How much empty white space to leave between the product and the edge of the output image.',
+    type: 'number_pct',
+    step: 0.5, min: 0, max: 25,
+  },
+  {
+    key: 'min_confidence',
+    label: 'When to send tricky images to the Review folder',
+    hint: 'If the tool can\'t clearly see the product — because the background isn\'t clean or the product touches the edge — it puts the image aside in a "Review" folder so you can check it manually.',
+    type: 'preset',
+    presets: [
+      { value: 0.6, label: 'Lenient — try to process almost everything' },
+      { value: 0.8, label: 'Balanced — send clearly uncertain images to Review (recommended)' },
+      { value: 0.9, label: 'Strict — send any slightly uncertain image to Review' },
+    ],
+  },
+];
+
+const ADVANCED_FIELDS = [
+  {
+    key: 'output_canvas',
+    label: 'Output image size (pixels)',
+    hint: 'The width and height of the final image. 600 × 800 is the agreed standard — changing this will make outputs inconsistent with existing ones.',
+    type: 'canvas',
+  },
+  {
+    key: 'tolerance_mad',
+    label: 'How strict about calling an image an "outlier"',
+    hint: 'How much an image has to differ from the group\'s typical size before it gets resized. Lower = resize more images.',
+    type: 'number',
+    step: 0.1, min: 0.5, max: 3.0,
+  },
+  {
+    key: 'bg_threshold',
+    label: 'How close to white must the background be?',
+    hint: 'Pixels brighter than this on all three colour channels (R, G, B) count as background. 245 handles normal product photography. Rarely needs changing.',
+    type: 'number',
+    step: 1, min: 200, max: 255,
+  },
+  {
+    key: 'recenter',
+    label: 'How to centre products in the frame',
+    hint: '"By visual weight" places the visually heavy part (the flower head of a stem, the body of a vase) at the centre. "By shape bounds" centres the whole product silhouette.',
+    type: 'choice',
+    options: [
+      { value: true,  label: 'By visual weight (recommended)' },
+      { value: false, label: 'By shape bounds' },
+    ],
+  },
 ];
 
 let currentConfig = null;
@@ -197,76 +260,193 @@ async function loadSettings() {
 
 function renderSettings(cfg) {
   els.settings.innerHTML = '';
-  for (const f of FIELDS) {
-    const wrap = document.createElement('div');
-    wrap.className = 'field';
-    const label = document.createElement('label');
-    label.textContent = f.key;
-    wrap.appendChild(label);
+  const everyday = makeSection('Everyday settings');
+  for (const f of EVERYDAY_FIELDS) everyday.body.appendChild(renderField(f, cfg));
+  els.settings.appendChild(everyday.section);
 
-    if (f.type === 'ratio') {
-      // "auto" or number
-      const line = document.createElement('div');
-      line.className = 'inline';
-      const autoLabel = document.createElement('label');
-      autoLabel.style.fontWeight = 'normal';
-      const autoCb = document.createElement('input');
-      autoCb.type = 'checkbox';
-      autoCb.checked = cfg.target_ratio === 'auto';
-      autoLabel.appendChild(autoCb);
-      autoLabel.appendChild(document.createTextNode(' auto'));
-      const num = document.createElement('input');
-      num.type = 'number';
-      num.step = '0.01';
-      num.min = '0.01';
-      num.max = '0.99';
-      num.value = typeof cfg.target_ratio === 'number' ? cfg.target_ratio : 0.5;
-      num.disabled = autoCb.checked;
-      autoCb.addEventListener('change', () => num.disabled = autoCb.checked);
-      line.append(autoLabel, num);
-      wrap.appendChild(line);
-      wrap.dataset.key = f.key;
-      wrap.dataset.type = 'ratio';
-      wrap._getters = () => autoCb.checked ? 'auto' : parseFloat(num.value);
-    } else if (f.type === 'bool') {
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = !!cfg[f.key];
-      wrap.appendChild(input);
-      wrap._getters = () => input.checked;
-    } else if (f.type === 'canvas') {
-      const line = document.createElement('div');
-      line.className = 'inline';
-      const w = document.createElement('input');
-      w.type = 'number';
-      w.min = '1';
-      w.value = cfg.output_canvas[0];
-      const x = document.createElement('span');
-      x.textContent = '×';
-      const h = document.createElement('input');
-      h.type = 'number';
-      h.min = '1';
-      h.value = cfg.output_canvas[1];
-      line.append(w, x, h);
-      wrap.appendChild(line);
-      wrap._getters = () => [parseInt(w.value, 10), parseInt(h.value, 10)];
-    } else {
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.step = f.step;
-      input.value = cfg[f.key];
-      wrap.appendChild(input);
-      wrap._getters = () => parseFloat(input.value);
-    }
+  const advanced = makeSection('Advanced', { collapsible: true, collapsed: true });
+  for (const f of ADVANCED_FIELDS) advanced.body.appendChild(renderField(f, cfg));
+  els.settings.appendChild(advanced.section);
+}
 
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.textContent = f.hint;
-    wrap.appendChild(hint);
-
-    wrap.dataset.key = f.key;
-    els.settings.appendChild(wrap);
+function makeSection(title, { collapsible = false, collapsed = false } = {}) {
+  const section = document.createElement('div');
+  section.className = 'settings-section';
+  const header = document.createElement('div');
+  header.className = 'settings-section-header';
+  header.textContent = title;
+  const body = document.createElement('div');
+  body.className = 'settings-section-body';
+  if (collapsible) {
+    section.classList.add('collapsible');
+    if (collapsed) section.classList.add('collapsed');
+    const chev = document.createElement('span');
+    chev.className = 'chev';
+    chev.textContent = '▸';
+    header.prepend(chev);
+    header.addEventListener('click', () => {
+      section.classList.toggle('collapsed');
+      chev.textContent = section.classList.contains('collapsed') ? '▸' : '▾';
+    });
+    if (!collapsed) chev.textContent = '▾';
   }
+  section.append(header, body);
+  return { section, body };
+}
+
+function renderField(f, cfg) {
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  wrap.dataset.key = f.key;
+
+  const label = document.createElement('label');
+  label.className = 'field-label';
+  label.textContent = f.label;
+  wrap.appendChild(label);
+
+  const control = document.createElement('div');
+  control.className = 'field-control';
+  wrap.appendChild(control);
+
+  if (f.type === 'ratio_choice') {
+    const auto = cfg.target_ratio === 'auto';
+    const radios = makeRadios(f.key, [
+      { value: 'auto',   label: 'Match the group\'s typical size (recommended)' },
+      { value: 'number', label: 'Set a specific size' },
+    ], auto ? 'auto' : 'number');
+    control.appendChild(radios.el);
+
+    const numWrap = document.createElement('div');
+    numWrap.className = 'sub-control';
+    const num = document.createElement('input');
+    num.type = 'number';
+    num.step = '5';
+    num.min = '5';
+    num.max = '95';
+    num.value = typeof cfg.target_ratio === 'number' ? Math.round(cfg.target_ratio * 100) : 50;
+    const unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = '% of the frame';
+    numWrap.append(num, unit);
+    control.appendChild(numWrap);
+
+    const updateDisabled = () => {
+      num.disabled = radios.value() === 'auto';
+      numWrap.classList.toggle('disabled', num.disabled);
+    };
+    radios.onChange(updateDisabled);
+    updateDisabled();
+
+    wrap._getters = () => radios.value() === 'auto' ? 'auto' : parseFloat(num.value) / 100;
+  }
+  else if (f.type === 'preset') {
+    const current = cfg[f.key];
+    const group = document.createElement('div');
+    group.className = 'preset-group';
+    let selected = current;
+    for (const p of f.presets) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'preset';
+      btn.textContent = p.label;
+      if (Math.abs((current ?? 0) - p.value) < 1e-6) btn.classList.add('active');
+      btn.addEventListener('click', () => {
+        selected = p.value;
+        group.querySelectorAll('.preset').forEach(b => b.classList.toggle('active', b === btn));
+      });
+      group.appendChild(btn);
+    }
+    control.appendChild(group);
+    wrap._getters = () => selected;
+  }
+  else if (f.type === 'choice') {
+    const current = cfg[f.key];
+    const radios = makeRadios(f.key, f.options, current);
+    control.appendChild(radios.el);
+    wrap._getters = () => radios.value();
+  }
+  else if (f.type === 'number_pct') {
+    const line = document.createElement('div');
+    line.className = 'inline';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = f.step;
+    if (f.min !== undefined) input.min = f.min;
+    if (f.max !== undefined) input.max = f.max;
+    input.value = cfg[f.key];
+    const unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = '%';
+    line.append(input, unit);
+    control.appendChild(line);
+    wrap._getters = () => parseFloat(input.value);
+  }
+  else if (f.type === 'canvas') {
+    const line = document.createElement('div');
+    line.className = 'inline';
+    const w = document.createElement('input');
+    w.type = 'number'; w.min = '1';
+    w.value = cfg.output_canvas[0];
+    const x = document.createElement('span');
+    x.className = 'unit';
+    x.textContent = '×';
+    const h = document.createElement('input');
+    h.type = 'number'; h.min = '1';
+    h.value = cfg.output_canvas[1];
+    const unit = document.createElement('span');
+    unit.className = 'unit';
+    unit.textContent = 'pixels';
+    line.append(w, x, h, unit);
+    control.appendChild(line);
+    wrap._getters = () => [parseInt(w.value, 10), parseInt(h.value, 10)];
+  }
+  else { // number
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = f.step;
+    if (f.min !== undefined) input.min = f.min;
+    if (f.max !== undefined) input.max = f.max;
+    input.value = cfg[f.key];
+    control.appendChild(input);
+    wrap._getters = () => parseFloat(input.value);
+  }
+
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = f.hint;
+  wrap.appendChild(hint);
+
+  return wrap;
+}
+
+function makeRadios(name, options, initialValue) {
+  const el = document.createElement('div');
+  el.className = 'radio-group';
+  const inputs = [];
+  const listeners = [];
+  for (const opt of options) {
+    const line = document.createElement('label');
+    line.className = 'radio';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = name;
+    input.dataset.value = JSON.stringify(opt.value);
+    input.checked = JSON.stringify(opt.value) === JSON.stringify(initialValue);
+    input.addEventListener('change', () => listeners.forEach(fn => fn()));
+    inputs.push(input);
+    const text = document.createElement('span');
+    text.textContent = opt.label;
+    line.append(input, text);
+    el.appendChild(line);
+  }
+  return {
+    el,
+    value: () => {
+      const sel = inputs.find(i => i.checked);
+      return sel ? JSON.parse(sel.dataset.value) : undefined;
+    },
+    onChange: (fn) => listeners.push(fn),
+  };
 }
 
 async function saveSettings() {

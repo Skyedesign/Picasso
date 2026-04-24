@@ -156,29 +156,69 @@ button.secondary { color: var(--muted); }
   gap: 6px;
 }
 
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-  padding: 20px;
+/* Settings layout — a stack of titled sections, each with stacked fields. */
+.settings-grid { padding: 8px 0; }
+
+.settings-section {
+  border-top: 1px solid var(--border);
 }
+.settings-section:first-child { border-top: none; }
+
+.settings-section-header {
+  padding: 12px 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+.settings-section.collapsible .settings-section-header {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-section.collapsible .chev {
+  font-size: 10px;
+  transition: transform 120ms;
+}
+
+.settings-section-body {
+  padding: 8px 20px 16px;
+}
+
+.settings-section.collapsed .settings-section-body { display: none; }
 
 .field {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-.field label {
-  font-size: 12px;
+.field:last-child { border-bottom: none; }
+
+.field-label {
+  font-size: 13px;
   font-weight: 500;
-  color: var(--muted);
+  color: var(--text);
+}
+
+.field-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .field .hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
-  font-style: italic;
+  line-height: 1.4;
 }
 
 .field input[type="text"],
@@ -187,6 +227,7 @@ button.secondary { color: var(--muted); }
   border: 1px solid var(--border);
   border-radius: 4px;
   font: inherit;
+  width: 100px;
 }
 
 .field .inline {
@@ -195,7 +236,62 @@ button.secondary { color: var(--muted); }
   align-items: center;
 }
 
-.field .inline input { flex: 1; min-width: 0; }
+.field .unit {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sub-control {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 22px;
+}
+
+.sub-control.disabled { opacity: 0.4; }
+
+/* Radio groups */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.radio {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 3px 0;
+}
+.radio input[type="radio"] { margin-top: 3px; flex-shrink: 0; }
+.radio span { line-height: 1.4; }
+
+/* Preset buttons */
+.preset-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.preset {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  transition: background 100ms, border-color 100ms;
+}
+.preset:hover { background: var(--bg); }
+.preset.active {
+  background: #eff6ff;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 500;
+}
 
 .job-status {
   font-size: 12px;

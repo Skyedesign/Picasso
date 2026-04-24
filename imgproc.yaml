@@ -1,11 +1,10 @@
-# Default configuration for imgproc.
-# Override per-folder by placing a `folder.yaml` in the same directory as the images.
-
-tolerance_mad: 1.5        # how far from group median before an image is flagged as an outlier
-target_ratio: auto        # "auto" = use group median, or a float between 0 and 1 to force
-bg_threshold: 245         # R, G, B all above this = treated as white background
-padding_pct: 5            # minimum breathing room (% of canvas) between product and canvas edge
-recenter: true            # true = recenter product via mask centroid; false = rescale only
-min_confidence: 0.8       # below this = queued for manual review instead of auto-processed
-max_upscale: 1.0          # cap on upscaling factor; 1.0 = never upscale past original
-output_canvas: [600, 800] # width, height of the output canvas (px)
+tolerance_mad: 1.5
+target_ratio: auto
+bg_threshold: 245
+padding_pct: 5.0
+recenter: true
+min_confidence: 0.8
+max_upscale: 1.2
+output_canvas:
+- 600
+- 800
