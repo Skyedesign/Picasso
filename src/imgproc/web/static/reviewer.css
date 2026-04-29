@@ -1,0 +1,473 @@
+/* Picasso Visual Reviewer — grid + expanded view.
+   Inherits theme variables from style.css. */
+
+body { margin: 0; }
+
+.rv-header {
+  background: white;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+}
+.rv-header .back {
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+.rv-header .back:hover { background: var(--bg); color: var(--accent); border-color: var(--accent); }
+.rv-title h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.rv-title .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.rv-header .summary {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--muted);
+}
+.rv-header .summary b { color: var(--text); }
+
+.rv-banner {
+  margin: 12px 24px 0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+}
+
+.rv-toolbar {
+  display: flex;
+  gap: 12px;
+  padding: 12px 24px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: white;
+}
+.rv-toolbar-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.rv-chip-select { white-space: nowrap; }
+.rv-chip-select.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.rv-bulk-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 24px;
+  align-items: center;
+  background: #eff6ff;
+  border-bottom: 1px solid var(--accent);
+  flex-wrap: wrap;
+}
+.rv-bulk-bar[hidden] { display: none; }
+.rv-bulk-count {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: 8px;
+}
+.rv-bulk-spacer { flex: 1; }
+.rv-chip-accept {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.rv-chip-accept:hover { background: #dcfce7; }
+.rv-chip-reject {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.rv-chip-reject:hover { background: #fee2e2; }
+.rv-chip-accept:disabled,
+.rv-chip-reject:disabled { opacity: 0.4; cursor: not-allowed; }
+.rv-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.rv-chip:hover { background: var(--bg); }
+.rv-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.rv-chip .count {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* "No verdict" gets an amber treatment when there's work in the queue and
+   it isn't the active filter — drives the eye back to the to-do list from
+   any other view. Active state overrides this (standard accent blue).
+   Empty queue sits neutrally. */
+.rv-chip.rv-chip-pending {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+.rv-chip.rv-chip-pending:hover { background: #fef3c7; }
+.rv-chip.rv-chip-pending.rv-chip-pending-empty {
+  background: white;
+  border-color: var(--border);
+  color: var(--muted);
+}
+.rv-chip.rv-chip-pending.rv-chip-pending-empty:hover { background: var(--bg); }
+/* `.active` last so it wins regardless of the empty/non-empty modifier. */
+.rv-chip.rv-chip-pending.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.rv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 20px 24px;
+}
+.rv-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.rv-tile {
+  position: relative;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 100ms, box-shadow 100ms;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+.rv-tile:hover { border-color: var(--accent); box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+.rv-tile.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.rv-tile.selected::after {
+  content: '✓';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+/* In select mode, tile clicks toggle selection — change cursor to signal that. */
+body.rv-selecting .rv-tile { cursor: copy; }
+.rv-tile-img {
+  background: var(--bg);
+  aspect-ratio: 3/4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.rv-tile-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.rv-tile-meta {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rv-tile-name {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rv-tile-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.rv-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-family: var(--mono);
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--muted);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.rv-badge.ok      { background: #dcfce7; color: var(--ok); }
+.rv-badge.outlier { background: #fff3e0; color: var(--warn); }
+.rv-badge.review  { background: #ffebee; color: var(--bad); }
+.rv-badge.skipped { background: #ede9fe; color: #6d28d9; }
+.rv-badge.unprocessed { background: var(--bg); color: var(--muted); }
+.rv-badge.unknown { background: var(--bg); color: var(--muted); }
+.rv-badge.verdict-accepted { background: #dbeafe; color: #1e3a8a; }
+.rv-badge.verdict-rejected { background: #fee2e2; color: var(--bad); }
+.rv-badge.verdict-rerun    { background: #fef3c7; color: #854d0e; }
+
+/* Expanded view — full-screen overlay with side-by-side panels. */
+.rv-expanded-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 25, 0.6);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.rv-expanded-overlay[hidden] { display: none; }
+
+.rv-expanded {
+  background: var(--card);
+  border-radius: 10px;
+  width: 1200px;
+  max-width: 100%;
+  max-height: 92vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.30);
+}
+
+.rv-expanded-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.rv-expanded-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+}
+.rv-expanded-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--muted);
+}
+.rv-expanded-close:hover { color: var(--bad); }
+
+.rv-expanded-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+.rv-pane { display: flex; flex-direction: column; gap: 8px; }
+.rv-pane-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+.rv-pane-frame {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  aspect-ratio: 3/4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.rv-pane-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.rv-pane-frame.empty {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.rv-reason {
+  grid-column: 1 / -1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.rv-reason-key { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.rv-reason-val { font-family: var(--mono); }
+
+.rv-expanded-actions {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  background: white;
+}
+.rv-expanded-actions[hidden] { display: none; }
+
+/* Override panel — shown when "Re-run…" is clicked */
+.rv-override-panel {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rv-override-panel[hidden] { display: none; }
+.rv-override-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+.rv-override-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.rv-override-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 40px;
+  text-align: right;
+}
+.rv-override-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.rv-override-chips .preset,
+.rv-mode-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text);
+}
+.rv-override-chips .preset:hover,
+.rv-mode-chip:hover { background: var(--bg); }
+.rv-override-chips .preset.active,
+.rv-mode-chip.active {
+  background: #eff6ff;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 500;
+}
+.rv-mode-chip.rv-mode-clear { color: var(--muted); }
+.rv-mode-chip.rv-mode-clear:hover { color: var(--bad); border-color: var(--bad); }
+
+.rv-override-summary {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--muted);
+  padding: 4px 0 0 122px;
+  min-height: 14px;
+}
+
+.rv-pane-hint {
+  font-size: 10px;
+  color: var(--accent);
+  font-style: italic;
+}
+.rv-pane-hint.error { color: var(--bad); font-style: normal; }
+
+/* Marker overlay over the original image. position:relative is on the
+   parent frame; this overlay matches the displayed image's letterboxed
+   inner box (computed in JS). */
+.rv-pane-frame { position: relative; }
+.rv-overlay {
+  position: absolute;
+  pointer-events: none;
+}
+.rv-overlay[hidden] { display: none; }
+.rv-overlay.bbox-mode,
+.rv-overlay.centroid-mode {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+.rv-marker-bbox {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgba(37, 99, 235, 0.12);
+  pointer-events: none;
+}
+.rv-marker-centroid {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgba(37, 99, 235, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.rv-action-btn {
+  font: inherit;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+}
+.rv-action-btn:hover { background: var(--bg); }
+.rv-action-btn.accept  { border-color: var(--ok);    color: var(--ok); }
+.rv-action-btn.accept:hover  { background: #dcfce7; }
+.rv-action-btn.reject  { border-color: var(--bad);   color: var(--bad); }
+.rv-action-btn.reject:hover  { background: #fee2e2; }
+.rv-action-btn.rerun   { border-color: var(--accent);color: var(--accent); }
+.rv-action-btn.rerun:hover   { background: #eff6ff; }
+.rv-action-btn.rv-action-reset {
+  border-color: var(--border);
+  color: var(--muted);
+}
+.rv-action-btn.rv-action-reset:hover { background: var(--bg); color: var(--text); }
+.rv-action-spacer { flex: 1; }
+.rv-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }

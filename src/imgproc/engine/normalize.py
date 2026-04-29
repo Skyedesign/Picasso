@@ -43,7 +43,12 @@ def normalize_to_canvas(
     current_area = bbox_w * bbox_h
     scale = math.sqrt(desired_area / current_area)
 
-    # Clamp: never exceed max_upscale; always leave at least padding_pct breathing room.
+    # Clamp: never exceed max_upscale; always leave at least padding_pct
+    # breathing room. This is the default (group-batch) behaviour. The
+    # per-image override paths (Demo Resizer, reviewer rerun + preview)
+    # call this with padding_pct=0 so the slider can actually reach the
+    # high end of its range — there, target_ratio is the user's explicit
+    # request and padding shouldn't fight it.
     pad_frac = padding_pct / 100.0
     max_scale_by_w = (canvas_w * (1 - 2 * pad_frac)) / bbox_w
     max_scale_by_h = (canvas_h * (1 - 2 * pad_frac)) / bbox_h

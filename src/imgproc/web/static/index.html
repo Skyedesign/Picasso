@@ -4,11 +4,16 @@
   <meta charset="utf-8">
   <title>imgproc</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/demo_resizer.css">
 </head>
 <body>
   <header>
     <h1>imgproc</h1>
     <div class="subtitle">Batches root: <code id="root">…</code></div>
+    <div class="header-tools">
+      <button id="demo-launch" type="button" title="Tune the fill ratio on a single image">🎨 Demo Resizer</button>
+      <button id="settings-launch" type="button" title="Edit imgproc.yaml defaults">⚙ Settings</button>
+    </div>
   </header>
 
   <main>
@@ -24,17 +29,6 @@
       <div id="batches" class="batches-list">
         <div class="empty">Loading…</div>
       </div>
-    </section>
-
-    <section id="settings-section">
-      <div class="section-header">
-        <h2>Settings</h2>
-        <div class="section-actions">
-          <button id="save-settings">Save</button>
-          <button id="reload-settings" class="secondary">Reload</button>
-        </div>
-      </div>
-      <div id="settings" class="settings-grid"></div>
     </section>
 
     <section id="log-section" hidden>
@@ -88,6 +82,7 @@
       </div>
       <div class="batch-actions">
         <button class="btn-open">Open folder</button>
+        <button class="btn-review" hidden>Review</button>
         <button class="btn-report" hidden>Open report</button>
         <button class="btn-process primary">Process</button>
         <button class="btn-remove danger" title="Delete this batch and all its contents">Remove</button>
@@ -95,6 +90,117 @@
     </div>
   </template>
 
+  <!-- Settings — modal overlay -->
+  <div id="settings-overlay" class="settings-overlay" hidden>
+    <div class="settings-modal" role="dialog" aria-labelledby="settings-title">
+      <div class="settings-modal-header">
+        <div id="settings-title" class="settings-modal-title">⚙ Settings</div>
+        <button id="settings-close" class="settings-modal-close" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="settings-modal-body">
+        <div id="settings" class="settings-grid"></div>
+      </div>
+      <div class="settings-modal-footer">
+        <button id="reload-settings" class="secondary" type="button">Reload</button>
+        <button id="save-settings" class="primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Picasso Demo Resizer — modal overlay -->
+  <div id="demo-overlay" class="demo-overlay" hidden>
+    <div class="demo-modal" role="dialog" aria-labelledby="demo-title">
+      <div class="demo-header">
+        <div id="demo-title" class="demo-title">🎨 Picasso Demo Resizer</div>
+        <div class="demo-header-actions">
+          <a class="demo-popout" href="/demo" target="_blank" rel="noopener" title="Open in a new browser tab">↗ Pop out</a>
+          <button id="demo-close" class="demo-close" type="button" aria-label="Close">×</button>
+        </div>
+      </div>
+
+      <!-- Step 1: pick an image -->
+      <div id="demo-step-pick" class="demo-step">
+        <div id="demo-drop-zone" class="demo-drop-zone">
+          <div class="demo-drop-title">Drop a hero image here</div>
+          <div class="demo-drop-hint">or click to choose a file</div>
+        </div>
+        <input type="file" id="demo-file-input" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden>
+
+        <div class="demo-or">— or pick from a batch —</div>
+        <div class="demo-batch-picker">
+          <select id="demo-batch-select">
+            <option value="">— select a batch —</option>
+          </select>
+          <select id="demo-batch-source">
+            <option value="top">Originals</option>
+            <option value="processed">Processed</option>
+            <option value="review">Review</option>
+          </select>
+        </div>
+        <div id="demo-batch-grid" class="demo-batch-grid"></div>
+      </div>
+
+      <!-- Step 2: tune ratio + canvas, see preview, apply -->
+      <div id="demo-step-tune" class="demo-step" hidden>
+        <div class="demo-compare">
+          <div class="demo-compare-side">
+            <div class="demo-side-label">Original</div>
+            <div class="demo-side-frame">
+              <img id="demo-original-img" alt="original">
+            </div>
+          </div>
+          <div class="demo-compare-side">
+            <div class="demo-side-label">
+              <span>Preview</span>
+              <span id="demo-preview-status" class="demo-status"></span>
+            </div>
+            <div class="demo-side-frame">
+              <img id="demo-preview-img" alt="preview">
+              <div id="demo-preview-spinner" class="demo-spinner" hidden>…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="demo-controls">
+          <div class="demo-slider-row">
+            <span class="demo-slider-label">Target ratio</span>
+            <input type="range" id="demo-ratio-slider" min="0.30" max="0.95" step="0.05" value="0.65">
+            <span id="demo-ratio-value" class="demo-ratio-value">0.65</span>
+          </div>
+          <div class="demo-slider-hints">
+            <span>0.30 (more whitespace)</span>
+            <span>0.95 (fills canvas)</span>
+          </div>
+          <div class="demo-canvas-row">
+            <span class="demo-slider-label">Canvas</span>
+            <div id="demo-canvas-presets" class="demo-canvas-presets"></div>
+          </div>
+        </div>
+
+        <div class="demo-apply">
+          <div class="demo-apply-label">Apply this ratio</div>
+          <div class="demo-apply-row">
+            <button id="demo-copy-ratio" class="demo-btn" type="button">📋 Copy ratio</button>
+            <button id="demo-save-preset" class="demo-btn" type="button">⭐ Save preset…</button>
+            <select id="demo-load-preset" class="demo-select">
+              <option value="">— load preset —</option>
+            </select>
+            <select id="demo-apply-batch" class="demo-select">
+              <option value="">— apply to batch —</option>
+            </select>
+            <button id="demo-apply-button" class="demo-btn primary" type="button" disabled>Apply</button>
+          </div>
+        </div>
+
+        <div class="demo-footer">
+          <button id="demo-back" class="demo-btn" type="button">← Pick another image</button>
+          <button id="demo-done" class="demo-btn" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/app.js"></script>
+  <script src="/static/demo_resizer.js"></script>
 </body>
 </html>

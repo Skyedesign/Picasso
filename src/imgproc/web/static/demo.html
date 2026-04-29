@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Picasso Demo Resizer</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/demo_resizer.css">
+  <style>
+    /* Standalone "popped out" page hosts the same modal markup as the main UI,
+       but without the rest of the imgproc surface — the modal fills the page
+       and never closes. The launch button is hidden. */
+    body { background: var(--bg); }
+    header { background: white; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+    header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+    header .subtitle { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    main { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+    /* Show the modal as a regular flow card on this page, not a fixed overlay. */
+    #demo-overlay {
+      position: static;
+      inset: auto;
+      background: transparent;
+      padding: 0;
+      display: block;
+    }
+    #demo-overlay .demo-modal {
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      max-height: none;
+      width: 100%;
+    }
+    /* Hide the close & "done" buttons — there's nothing to return to. */
+    #demo-close, #demo-done { display: none; }
+    .demo-popout { display: none; }
+  </style>
+</head>
+<body data-demo-auto-open="1">
+  <header>
+    <h1>🎨 Picasso Demo Resizer</h1>
+    <div class="subtitle">Tune the fill ratio on a single image, save presets, or apply a ratio to a batch.</div>
+  </header>
+  <main>
+    <!-- Same markup as the main page's modal, served standalone. -->
+    <div id="demo-overlay" class="demo-overlay">
+      <div class="demo-modal" role="dialog" aria-labelledby="demo-title">
+        <div class="demo-header">
+          <div id="demo-title" class="demo-title">Picasso Demo Resizer</div>
+          <div class="demo-header-actions">
+            <a class="demo-popout" href="/demo" target="_blank" rel="noopener">↗ Pop out</a>
+            <button id="demo-close" class="demo-close" type="button" aria-label="Close">×</button>
+          </div>
+        </div>
+
+        <div id="demo-step-pick" class="demo-step">
+          <div id="demo-drop-zone" class="demo-drop-zone">
+            <div class="demo-drop-title">Drop a hero image here</div>
+            <div class="demo-drop-hint">or click to choose a file</div>
+          </div>
+          <input type="file" id="demo-file-input" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden>
+
+          <div class="demo-or">— or pick from a batch —</div>
+          <div class="demo-batch-picker">
+            <select id="demo-batch-select">
+              <option value="">— select a batch —</option>
+            </select>
+            <select id="demo-batch-source">
+              <option value="top">Originals</option>
+              <option value="processed">Processed</option>
+              <option value="review">Review</option>
+            </select>
+          </div>
+          <div id="demo-batch-grid" class="demo-batch-grid"></div>
+        </div>
+
+        <div id="demo-step-tune" class="demo-step" hidden>
+          <div class="demo-compare">
+            <div class="demo-compare-side">
+              <div class="demo-side-label">Original</div>
+              <div class="demo-side-frame"><img id="demo-original-img" alt="original"></div>
+            </div>
+            <div class="demo-compare-side">
+              <div class="demo-side-label">
+                <span>Preview</span>
+                <span id="demo-preview-status" class="demo-status"></span>
+              </div>
+              <div class="demo-side-frame">
+                <img id="demo-preview-img" alt="preview">
+                <div id="demo-preview-spinner" class="demo-spinner" hidden>…</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="demo-controls">
+            <div class="demo-slider-row">
+              <span class="demo-slider-label">Target ratio</span>
+              <input type="range" id="demo-ratio-slider" min="0.30" max="0.95" step="0.05" value="0.65">
+              <span id="demo-ratio-value" class="demo-ratio-value">0.65</span>
+            </div>
+            <div class="demo-slider-hints">
+              <span>0.30 (more whitespace)</span>
+              <span>0.95 (fills canvas)</span>
+            </div>
+            <div class="demo-canvas-row">
+              <span class="demo-slider-label">Canvas</span>
+              <div id="demo-canvas-presets" class="demo-canvas-presets"></div>
+            </div>
+          </div>
+
+          <div class="demo-apply">
+            <div class="demo-apply-label">Apply this ratio</div>
+            <div class="demo-apply-row">
+              <button id="demo-copy-ratio" class="demo-btn" type="button">📋 Copy ratio</button>
+              <button id="demo-save-preset" class="demo-btn" type="button">⭐ Save preset…</button>
+              <select id="demo-load-preset" class="demo-select">
+                <option value="">— load preset —</option>
+              </select>
+              <select id="demo-apply-batch" class="demo-select">
+                <option value="">— apply to batch —</option>
+              </select>
+              <button id="demo-apply-button" class="demo-btn primary" type="button" disabled>Apply</button>
+            </div>
+          </div>
+
+          <div class="demo-footer">
+            <button id="demo-back" class="demo-btn" type="button">← Pick another image</button>
+            <button id="demo-done" class="demo-btn" type="button">Done</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/static/demo_resizer.js"></script>
+</body>
+</html>

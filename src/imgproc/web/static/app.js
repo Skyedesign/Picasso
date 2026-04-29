@@ -10,6 +10,9 @@ const els = {
   settings: document.getElementById('settings'),
   saveSettings: document.getElementById('save-settings'),
   reloadSettings: document.getElementById('reload-settings'),
+  settingsLaunch: document.getElementById('settings-launch'),
+  settingsOverlay: document.getElementById('settings-overlay'),
+  settingsClose: document.getElementById('settings-close'),
   logSection: document.getElementById('log-section'),
   log: document.getElementById('log'),
   jobStatus: document.getElementById('job-status'),
@@ -98,6 +101,15 @@ function renderBatches(batches) {
     }
 
     row.querySelector('.btn-open').addEventListener('click', () => openBatch(b.name));
+    const btnReview = row.querySelector('.btn-review');
+    // Reviewer needs SOMETHING to show — at minimum, top-level images. Hide
+    // when the folder is empty (just-created, no import yet).
+    if (b.image_count > 0 || b.has_report) {
+      btnReview.hidden = false;
+      btnReview.addEventListener('click', () => {
+        window.open(`/reviewer/${encodeURIComponent(b.name)}`, '_blank');
+      });
+    }
     const btnReport = row.querySelector('.btn-report');
     if (b.has_report) {
       btnReport.hidden = false;
@@ -238,6 +250,14 @@ async function processBatch(name) {
   }
 }
 
+const _PHASE_LABEL = {
+  starting:    'Starting',
+  scanning:    'Detecting products',
+  writing:     'Writing outputs',
+  report:      'Writing report',
+  done:        'Finishing',
+};
+
 async function pollJob(id, batchName) {
   while (true) {
     await new Promise(r => setTimeout(r, 600));
@@ -245,11 +265,18 @@ async function pollJob(id, batchName) {
     try {
       job = await api(`/api/jobs/${id}`);
     } catch (e) {
-      setJobStatus('error', e.message);
+      setJobStatus('error', `${batchName}: ${e.message}`);
       return;
     }
-    els.log.textContent = job.log || '(no output yet)';
-    if (job.status === 'running') continue;
+    els.log.textContent = job.log || '(running…)';
+
+    if (job.status === 'running') {
+      const phase = job.progress && job.progress.phase;
+      const label = _PHASE_LABEL[phase] || phase || 'Running';
+      setJobStatus('running', `${batchName}: ${label}`, job.progress);
+      continue;
+    }
+
     setJobStatus(job.status, `${batchName}: ${job.status}`);
     if (job.status === 'done') {
       await loadBatches();  // pick up new report.html + counts
@@ -264,15 +291,51 @@ async function pollJob(id, batchName) {
   }
 }
 
-function setJobStatus(status, text) {
+function setJobStatus(status, text, progress) {
   els.jobStatus.className = `job-status ${status}`;
-  els.jobStatus.textContent = text;
+  els.jobStatus.innerHTML = '';
+
+  if (status === 'running') {
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    els.jobStatus.appendChild(spinner);
+  }
+
+  const label = document.createElement('span');
+  label.textContent = text;
+  els.jobStatus.appendChild(label);
+
+  if (progress && progress.total > 0) {
+    const pct = Math.round((progress.current / progress.total) * 100);
+    const counter = document.createElement('span');
+    counter.className = 'counter';
+    counter.textContent = `${progress.current}/${progress.total} (${pct}%)`;
+    els.jobStatus.appendChild(counter);
+
+    const bar = document.createElement('span');
+    bar.className = 'progress-bar';
+    const fill = document.createElement('span');
+    fill.className = 'fill';
+    fill.style.width = pct + '%';
+    bar.appendChild(fill);
+    els.jobStatus.appendChild(bar);
+  }
 }
 
 // ─── Settings ──────────────────────────────────────────────────────────
 // Field definitions use plain-English labels & hints. Internal keys match the
 // pydantic Config schema so the save payload is unchanged.
 const EVERYDAY_FIELDS = [
+  {
+    key: 'output_canvas',
+    label: 'Output image shape',
+    hint: 'The size and aspect ratio of the final image. Delicious Display uses 3:4 (600×800); Famous Mountain uses 1:1 (600×600). Per-batch overrides can be set from the Demo Resizer.',
+    type: 'canvas_preset',
+    presets: [
+      { value: [600, 800], label: 'Delicious Display — 600×800 (3:4)' },
+      { value: [600, 600], label: 'Famous Mountain — 600×600 (1:1)' },
+    ],
+  },
   {
     key: 'target_ratio',
     label: 'How big should products appear in the frame?',
@@ -334,12 +397,6 @@ const EVERYDAY_FIELDS = [
 
 const ADVANCED_FIELDS = [
   {
-    key: 'output_canvas',
-    label: 'Output image size (pixels)',
-    hint: 'The width and height of the final image. 600 × 800 is the agreed standard — changing this will make outputs inconsistent with existing ones.',
-    type: 'canvas',
-  },
-  {
     key: 'tolerance_mad',
     label: 'How strict about calling an image an "outlier"',
     hint: 'How much an image has to differ from the group\'s typical size before it gets resized. Lower = resize more images.',
@@ -378,7 +435,10 @@ async function loadSettings() {
 
 function renderSettings(cfg) {
   els.settings.innerHTML = '';
-  const everyday = makeSection('Everyday settings', { collapsible: true, collapsed: false });
+  // Both accordions start collapsed: makes both sections discoverable on
+  // open, and means the most-changed field (Output image size, in Advanced)
+  // is one click away regardless of which section it lives in.
+  const everyday = makeSection('Everyday settings', { collapsible: true, collapsed: true });
   for (const f of EVERYDAY_FIELDS) everyday.body.appendChild(renderField(f, cfg));
   els.settings.appendChild(everyday.section);
 
@@ -477,6 +537,31 @@ function renderField(f, cfg) {
     control.appendChild(group);
     wrap._getters = () => selected;
   }
+  else if (f.type === 'canvas_preset') {
+    // Like 'preset' but values are [W, H] tuples. If the on-disk value
+    // doesn't match any preset, no chip activates and the original value
+    // is preserved on save (so a hand-edited imgproc.yaml with a custom
+    // canvas isn't clobbered just by opening the Settings modal).
+    const current = Array.isArray(cfg[f.key]) ? cfg[f.key] : [600, 800];
+    let selected = current.slice();
+    const group = document.createElement('div');
+    group.className = 'preset-group';
+    for (const p of f.presets) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'preset';
+      btn.textContent = p.label;
+      const isActive = current[0] === p.value[0] && current[1] === p.value[1];
+      if (isActive) btn.classList.add('active');
+      btn.addEventListener('click', () => {
+        selected = p.value.slice();
+        group.querySelectorAll('.preset').forEach(b => b.classList.toggle('active', b === btn));
+      });
+      group.appendChild(btn);
+    }
+    control.appendChild(group);
+    wrap._getters = () => selected;
+  }
   else if (f.type === 'choice') {
     const current = cfg[f.key];
     const radios = makeRadios(f.key, f.options, current);
@@ -498,25 +583,6 @@ function renderField(f, cfg) {
     line.append(input, unit);
     control.appendChild(line);
     wrap._getters = () => parseFloat(input.value);
-  }
-  else if (f.type === 'canvas') {
-    const line = document.createElement('div');
-    line.className = 'inline';
-    const w = document.createElement('input');
-    w.type = 'number'; w.min = '1';
-    w.value = cfg.output_canvas[0];
-    const x = document.createElement('span');
-    x.className = 'unit';
-    x.textContent = '×';
-    const h = document.createElement('input');
-    h.type = 'number'; h.min = '1';
-    h.value = cfg.output_canvas[1];
-    const unit = document.createElement('span');
-    unit.className = 'unit';
-    unit.textContent = 'pixels';
-    line.append(w, x, h, unit);
-    control.appendChild(line);
-    wrap._getters = () => [parseInt(w.value, 10), parseInt(h.value, 10)];
   }
   else { // number
     const input = document.createElement('input');
@@ -576,6 +642,9 @@ async function saveSettings() {
     await api('/api/config', { method: 'POST', body: JSON.stringify(payload) });
     currentConfig = payload;
     toast('Settings saved');
+    // Settings are modal-only now; close on success after a beat so the
+    // toast is visible. Idempotent if already closed.
+    setTimeout(() => { els.settingsOverlay.hidden = true; }, 600);
   } catch (e) {
     toast(`Save failed: ${e.message}`, true);
   }
@@ -601,5 +670,22 @@ els.refresh.addEventListener('click', loadBatches);
 els.saveSettings.addEventListener('click', saveSettings);
 els.reloadSettings.addEventListener('click', loadSettings);
 
+// ─── Settings modal ────────────────────────────────────────────────────
+function openSettings() {
+  els.settingsOverlay.hidden = false;
+  // Refresh on each open in case a sibling tab or external edit changed imgproc.yaml.
+  loadSettings();
+}
+function closeSettings() { els.settingsOverlay.hidden = true; }
+
+els.settingsLaunch.addEventListener('click', openSettings);
+els.settingsClose.addEventListener('click', closeSettings);
+els.settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === els.settingsOverlay) closeSettings();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !els.settingsOverlay.hidden) closeSettings();
+});
+
 loadBatches();
-loadSettings();
+// Settings load lazily on first open — no upfront fetch.

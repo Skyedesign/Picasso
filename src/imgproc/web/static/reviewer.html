@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Reviewer · Picasso</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/reviewer.css">
+</head>
+<body>
+  <div class="rv-header">
+    <a class="back" href="/">← Batches</a>
+    <div class="rv-title">
+      <h1 id="rv-batch-name">…</h1>
+      <div class="sub" id="rv-batch-sub"></div>
+    </div>
+    <div class="summary" id="rv-summary"></div>
+  </div>
+
+  <div class="rv-banner" id="rv-banner" hidden></div>
+
+  <div class="rv-toolbar">
+    <div class="rv-toolbar-chips" id="rv-toolbar"></div>
+    <button id="rv-select-toggle" class="rv-chip rv-chip-select" type="button">☐ Select</button>
+  </div>
+
+  <div class="rv-bulk-bar" id="rv-bulk-bar" hidden>
+    <span id="rv-bulk-count" class="rv-bulk-count">0 selected</span>
+    <button id="rv-bulk-select-visible" class="rv-chip" type="button">Select all visible</button>
+    <button id="rv-bulk-clear" class="rv-chip" type="button">Clear</button>
+    <span class="rv-bulk-spacer"></span>
+    <button id="rv-bulk-accept" class="rv-chip rv-chip-accept" type="button">Accept</button>
+    <button id="rv-bulk-reject" class="rv-chip rv-chip-reject" type="button">Reject</button>
+    <button id="rv-bulk-done"   class="rv-chip" type="button">Done</button>
+  </div>
+
+  <div class="rv-grid" id="rv-grid"></div>
+
+  <!-- Expanded view -->
+  <div class="rv-expanded-overlay" id="rv-expanded-overlay" hidden>
+    <div class="rv-expanded" role="dialog" aria-labelledby="rv-x-name">
+      <div class="rv-expanded-header">
+        <div class="rv-expanded-name" id="rv-x-name">…</div>
+        <button id="rv-expanded-close" class="rv-expanded-close" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="rv-expanded-body">
+        <div class="rv-pane">
+          <div class="rv-pane-label">
+            <span>Original</span>
+            <span id="rv-x-mode-hint" class="rv-pane-hint"></span>
+          </div>
+          <div class="rv-pane-frame" id="rv-x-original-frame">
+            <img id="rv-x-original" alt="original">
+            <!-- Marker overlay (centroid dot, bbox rect) absolutely positioned over the image -->
+            <div id="rv-x-overlay" class="rv-overlay" hidden></div>
+          </div>
+        </div>
+        <div class="rv-pane">
+          <div class="rv-pane-label">
+            <span>Output</span>
+            <span id="rv-x-output-hint" class="rv-pane-hint"></span>
+          </div>
+          <div class="rv-pane-frame" id="rv-x-output-frame"></div>
+        </div>
+        <div class="rv-reason" id="rv-x-reason"></div>
+      </div>
+
+      <!-- Override panel (shown when "Re-run…" is clicked) -->
+      <div id="rv-override-panel" class="rv-override-panel" hidden>
+        <div class="rv-override-row">
+          <span class="rv-override-label">Target ratio</span>
+          <input type="range" id="rv-override-ratio" min="0.30" max="0.95" step="0.05" value="0.65">
+          <span id="rv-override-ratio-val" class="rv-override-value">0.65</span>
+        </div>
+        <div class="rv-override-row">
+          <span class="rv-override-label">Canvas</span>
+          <div id="rv-override-canvas-chips" class="rv-override-chips"></div>
+        </div>
+        <div class="rv-override-row">
+          <span class="rv-override-label">Placement</span>
+          <div class="rv-override-chips">
+            <button type="button" class="rv-mode-chip" data-mode="centroid">Click center point</button>
+            <button type="button" class="rv-mode-chip" data-mode="bbox">Drag manual bbox</button>
+            <button type="button" class="rv-mode-chip rv-mode-clear" data-mode="clear">Clear</button>
+          </div>
+        </div>
+        <div class="rv-override-summary" id="rv-override-summary"></div>
+      </div>
+
+      <div class="rv-expanded-actions" id="rv-expanded-actions">
+        <button id="rv-act-reset"  class="rv-action-btn rv-action-reset" type="button" hidden title="Clear this verdict and return to No verdict">↺ Reset</button>
+        <span class="rv-action-spacer"></span>
+        <button id="rv-act-accept" class="rv-action-btn accept" type="button">Accept</button>
+        <button id="rv-act-reject" class="rv-action-btn reject" type="button">Reject</button>
+        <button id="rv-act-rerun"  class="rv-action-btn rerun"  type="button">Re-run…</button>
+      </div>
+      <div class="rv-expanded-actions" id="rv-expanded-rerun-actions" hidden>
+        <button id="rv-act-rerun-cancel" class="rv-action-btn" type="button">Cancel</button>
+        <button id="rv-act-rerun-run"    class="rv-action-btn rerun" type="button">Run</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/reviewer.js"></script>
+</body>
+</html>

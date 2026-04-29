@@ -10,6 +10,13 @@ from pathlib import Path
 import click
 from PIL import Image
 
+from .batch_meta import (
+    BatchMeta,
+    BatchStats,
+    ImageRow,
+    now_iso,
+    write_meta,
+)
 from .config import Config, find_project_root
 from .engine import (
     Detection,
@@ -18,6 +25,7 @@ from .engine import (
     normalize_to_canvas,
 )
 from .engine.stats import GroupStats, is_outlier
+from .output import resolve_output_path, status_subfolder
 from .report.writer import write_report
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -49,6 +57,195 @@ def _resolve_config(folder: Path, config_path: Path | None, cli_overrides: dict)
     return Config(**data)
 
 
+def process_folder(
+    folder: Path,
+    *,
+    config_path: Path | None = None,
+    cli_overrides: dict | None = None,
+    progress=None,
+    log=None,
+    dry_run: bool = False,
+) -> dict:
+    """Run the full batch pipeline on `folder`.
+
+    Hot loops in this function call the `progress` callback with dicts of
+    shape ``{"phase": "scanning"|"writing"|"report"|"done", "current": int,
+    "total": int}`` so the web UI can render a live counter. The CLI
+    command passes click.echo as `log`; the web server passes a closure
+    that appends to the job's running log buffer. Both are optional —
+    when omitted, the function runs silently.
+
+    Returns a dict with `ok`, `error` (on failure), `stats`, the per-bucket
+    counts, and `report_path` (None on dry-run or empty batch).
+    """
+    log = log or (lambda _: None)
+    progress = progress or (lambda _: None)
+    cli_overrides = cli_overrides or {}
+
+    cfg = _resolve_config(folder, config_path, cli_overrides)
+
+    image_paths = _find_images(folder)
+    if not image_paths:
+        log(f"No images found in {folder}")
+        progress({"phase": "done", "current": 0, "total": 0})
+        return {"ok": False, "error": "no images found"}
+
+    n_total = len(image_paths)
+    log(f"Scanning {n_total} images in {folder}...")
+    progress({"phase": "scanning", "current": 0, "total": n_total})
+
+    detections: list[Detection] = []
+    for i, p in enumerate(image_paths, 1):
+        try:
+            img = Image.open(p)
+            img.load()
+        except Exception as e:
+            log(f"  skip {p.name}: {e}")
+            progress({"phase": "scanning", "current": i, "total": n_total})
+            continue
+        det = detect_product(p, img, bg_threshold=cfg.bg_threshold)
+        detections.append(det)
+        progress({"phase": "scanning", "current": i, "total": n_total})
+
+    if not detections:
+        log("No images could be processed.")
+        progress({"phase": "done", "current": 0, "total": 0})
+        return {"ok": False, "error": "no detections"}
+
+    # ─── Filter pass ────────────────────────────────────────────────────
+    # Each filter tags an image with a skip reason or leaves it as a candidate.
+    # Skip decisions happen BEFORE group stats so lifestyle shots don't drag
+    # the median toward huge-"product" scenes.
+    skipped: list[tuple[Detection, str]] = []
+    candidates: list[Detection] = []
+    for det in detections:
+        reason: str | None = None
+        if cfg.skip_lifestyle and det.bg.purity < cfg.lifestyle_bg_threshold:
+            reason = "lifestyle-bg"
+        if reason:
+            skipped.append((det, reason))
+        else:
+            candidates.append(det)
+
+    if not candidates:
+        log("All images were filtered out — nothing to process.")
+
+    target_override = None if cfg.target_ratio == "auto" else float(cfg.target_ratio)
+    stats = compute_group_stats(
+        candidates,
+        tolerance_mad=cfg.tolerance_mad,
+        target_override=target_override,
+    ) if candidates else None
+
+    if stats:
+        log(
+            f"  group median occupied ratio: {stats.median_ratio:.3f} "
+            f"(MAD {stats.mad:.3f}, bounds {stats.lower_bound:.3f}–{stats.upper_bound:.3f})"
+        )
+
+    # Output dirs are created lazily by `resolve_output_path` callers (parents
+    # of each output file get mkdir'd on the way in). v1.1 sub-batches add
+    # per-group subdirs without an upfront enumeration.
+    report_rows: list[dict] = []
+    n_processed = n_reviewed = n_outliers = n_skipped = 0
+    written = 0
+    n_writes = len(detections)
+    progress({"phase": "writing", "current": 0, "total": n_writes})
+
+    for det, reason in skipped:
+        n_skipped += 1
+        status = f"skipped-{reason}"
+        output_path = None
+        if not dry_run:
+            output_path = resolve_output_path(folder, det.source_path.name, status, group=None)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(det.source_path, output_path)
+        report_rows.append({
+            "name": det.source_path.name,
+            "status": status,
+            "occupied_ratio": det.occupied_ratio,
+            "confidence": det.confidence,
+            "bg_is_white": det.bg.is_white,
+            "bg_purity": det.bg.purity,
+            "output_path": output_path,
+        })
+        written += 1
+        progress({"phase": "writing", "current": written, "total": n_writes})
+
+    for det in candidates:
+        outlier = is_outlier(det, stats) if stats else False
+        low_conf = det.confidence < cfg.min_confidence
+        status: str
+        output_path: Path | None = None
+
+        if low_conf:
+            status = "review"
+            n_reviewed += 1
+            if not dry_run:
+                output_path = resolve_output_path(folder, det.source_path.name, status, group=None)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(det.source_path, output_path)
+        else:
+            normalized = normalize_to_canvas(
+                det,
+                target_ratio=stats.target_ratio,
+                canvas_size=cfg.output_canvas,
+                padding_pct=cfg.padding_pct,
+                max_upscale=cfg.max_upscale,
+                recenter_on_mask_centroid=cfg.recenter,
+            )
+            status = "outlier" if outlier else "within-tolerance"
+            if outlier:
+                n_outliers += 1
+            n_processed += 1
+            if not dry_run:
+                output_path = resolve_output_path(folder, det.source_path.name, status, group=None)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                normalized.save(output_path, quality=92)
+
+        report_rows.append({
+            "name": det.source_path.name,
+            "status": status,
+            "occupied_ratio": det.occupied_ratio,
+            "confidence": det.confidence,
+            "bg_is_white": det.bg.is_white,
+            "bg_purity": det.bg.purity,
+            "output_path": output_path,
+        })
+        written += 1
+        progress({"phase": "writing", "current": written, "total": n_writes})
+
+    log(
+        f"  processed: {n_processed} (of which {n_outliers} rescaled as outliers), "
+        f"review: {n_reviewed}, skipped: {n_skipped}"
+    )
+
+    report_path: Path | None = None
+    if not dry_run:
+        progress({"phase": "report", "current": 0, "total": 1})
+        report_path = write_report(folder, detections, stats, report_rows, cfg)
+        log(f"  report: {report_path}")
+        # Sidecar batch.json mirrors the report rows in machine-readable form
+        # so the visual reviewer (M2) can render the batch without re-running
+        # detection. Sibling to report.html, distinct from user-edited
+        # folder.yaml.
+        meta = _build_batch_meta(folder, report_rows, stats, cfg)
+        write_meta(folder, meta)
+        progress({"phase": "report", "current": 1, "total": 1})
+
+    progress({"phase": "done", "current": n_writes, "total": n_writes})
+    return {
+        "ok": True,
+        "stats": stats,
+        "n_total": n_total,
+        "n_processed": n_processed,
+        "n_outliers": n_outliers,
+        "n_reviewed": n_reviewed,
+        "n_skipped": n_skipped,
+        "report_path": report_path,
+    }
+
+
 @click.command()
 @click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -72,140 +269,67 @@ def main(
     if target_ratio is not None:
         overrides["target_ratio"] = target_ratio
 
-    cfg = _resolve_config(folder, config_path, overrides)
-
-    image_paths = _find_images(folder)
-    if not image_paths:
-        click.echo(f"No images found in {folder}", err=True)
-        sys.exit(1)
-
-    click.echo(f"Scanning {len(image_paths)} images in {folder}...")
-
-    detections: list[Detection] = []
-    for p in image_paths:
-        try:
-            img = Image.open(p)
-            img.load()
-        except Exception as e:
-            click.echo(f"  skip {p.name}: {e}", err=True)
-            continue
-        det = detect_product(p, img, bg_threshold=cfg.bg_threshold)
-        detections.append(det)
-
-    if not detections:
-        click.echo("No images could be processed.", err=True)
-        sys.exit(1)
-
-    # ─── Filter pass ────────────────────────────────────────────────────
-    # Each filter tags an image with a skip reason or leaves it as a candidate.
-    # Skip decisions happen BEFORE group stats so lifestyle shots don't drag
-    # the median toward huge-"product" scenes.
-    skipped: list[tuple[Detection, str]] = []  # (detection, reason)
-    candidates: list[Detection] = []
-    for det in detections:
-        reason: str | None = None
-        if cfg.skip_lifestyle and det.bg.purity < cfg.lifestyle_bg_threshold:
-            reason = "lifestyle-bg"
-        if reason:
-            skipped.append((det, reason))
-        else:
-            candidates.append(det)
-
-    if not candidates:
-        click.echo("All images were filtered out — nothing to process.", err=True)
-
-    target_override = None if cfg.target_ratio == "auto" else float(cfg.target_ratio)
-    stats = compute_group_stats(
-        candidates,
-        tolerance_mad=cfg.tolerance_mad,
-        target_override=target_override,
-    ) if candidates else None
-
-    if stats:
-        click.echo(
-            f"  group median occupied ratio: {stats.median_ratio:.3f} "
-            f"(MAD {stats.mad:.3f}, bounds {stats.lower_bound:.3f}–{stats.upper_bound:.3f})"
-        )
-
-    processed_dir = folder / "processed"
-    review_dir = folder / "review"
-    skipped_dir = folder / "skipped"
-    if not dry_run:
-        processed_dir.mkdir(exist_ok=True)
-        review_dir.mkdir(exist_ok=True)
-        if skipped:
-            skipped_dir.mkdir(exist_ok=True)
-
-    report_rows = []
-    n_processed = n_reviewed = n_outliers = n_skipped = 0
-
-    # Skipped images first — unchanged copy, with the reason recorded.
-    for det, reason in skipped:
-        n_skipped += 1
-        output_path = None
-        if not dry_run:
-            output_path = skipped_dir / det.source_path.name
-            shutil.copy2(det.source_path, output_path)
-        report_rows.append({
-            "name": det.source_path.name,
-            "status": f"skipped-{reason}",
-            "occupied_ratio": det.occupied_ratio,
-            "confidence": det.confidence,
-            "bg_is_white": det.bg.is_white,
-            "bg_purity": det.bg.purity,
-            "output_path": output_path,
-        })
-
-    # Then the candidates — processed or sent to review.
-    for det in candidates:
-        outlier = is_outlier(det, stats) if stats else False
-        low_conf = det.confidence < cfg.min_confidence
-        status: str
-        output_path: Path | None = None
-
-        if low_conf:
-            status = "review"
-            n_reviewed += 1
-            if not dry_run:
-                output_path = review_dir / det.source_path.name
-                shutil.copy2(det.source_path, output_path)
-        else:
-            normalized = normalize_to_canvas(
-                det,
-                target_ratio=stats.target_ratio,
-                canvas_size=cfg.output_canvas,
-                padding_pct=cfg.padding_pct,
-                max_upscale=cfg.max_upscale,
-                recenter_on_mask_centroid=cfg.recenter,
-            )
-            status = "outlier" if outlier else "within-tolerance"
-            if outlier:
-                n_outliers += 1
-            n_processed += 1
-            if not dry_run:
-                output_path = processed_dir / det.source_path.name
-                normalized.save(output_path, quality=92)
-
-        report_rows.append({
-            "name": det.source_path.name,
-            "status": status,
-            "occupied_ratio": det.occupied_ratio,
-            "confidence": det.confidence,
-            "bg_is_white": det.bg.is_white,
-            "bg_purity": det.bg.purity,
-            "output_path": output_path,
-        })
-
-    click.echo(
-        f"  processed: {n_processed} (of which {n_outliers} rescaled as outliers), "
-        f"review: {n_reviewed}, skipped: {n_skipped}"
+    result = process_folder(
+        folder,
+        config_path=config_path,
+        cli_overrides=overrides,
+        log=click.echo,
+        dry_run=dry_run,
     )
+    if not result["ok"]:
+        # `log` already wrote a human-readable error line via click.echo.
+        sys.exit(1)
+    if open_report and result.get("report_path"):
+        webbrowser.open(result["report_path"].as_uri())
 
-    if not dry_run:
-        report_path = write_report(folder, detections, stats, report_rows, cfg)
-        click.echo(f"  report: {report_path}")
-        if open_report:
-            webbrowser.open(report_path.as_uri())
+
+def _build_batch_meta(
+    folder: Path,
+    report_rows: list[dict],
+    stats: GroupStats | None,
+    cfg: Config,
+) -> BatchMeta:
+    """Translate the CLI's row dicts + stats into the BatchMeta sidecar shape."""
+    images: list[ImageRow] = []
+    for row in report_rows:
+        out_path: Path | None = row.get("output_path")
+        sub = status_subfolder(row["status"]) if out_path else None
+        images.append(ImageRow(
+            name=row["name"],
+            status=row["status"],
+            occupied_ratio=row["occupied_ratio"],
+            confidence=row["confidence"],
+            bg_is_white=row["bg_is_white"],
+            bg_purity=row["bg_purity"],
+            output_subfolder=sub,
+            output_filename=out_path.name if out_path else None,
+            group=None,  # v1.1 hook
+            verdict=None,
+        ))
+    n_total = len(images)
+    n_processed = sum(1 for r in images if r.status in ("within-tolerance", "outlier"))
+    n_review = sum(1 for r in images if r.status == "review")
+    n_skipped = sum(1 for r in images if r.status.startswith("skipped"))
+    bs = None
+    if stats is not None:
+        bs = BatchStats(
+            median_ratio=stats.median_ratio,
+            mad=stats.mad,
+            target_ratio=stats.target_ratio,
+            lower_bound=stats.lower_bound,
+            upper_bound=stats.upper_bound,
+            n_total=n_total,
+            n_processed=n_processed,
+            n_review=n_review,
+            n_skipped=n_skipped,
+        )
+    return BatchMeta(
+        batch_name=folder.name,
+        last_run_timestamp=now_iso(),
+        last_run_config=cfg.model_dump(),
+        stats=bs,
+        images=images,
+    )
 
 
 if __name__ == "__main__":
