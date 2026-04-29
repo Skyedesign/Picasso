@@ -37,9 +37,12 @@
   }
 
   async function install(info) {
-    const ok = confirm(
-      'Update Picasso from ' + info.current_version + ' to ' + info.latest_version + '?\n\n' +
-      'The server will restart automatically. Your batches and settings are preserved.'
+    const ok = await window.modalConfirm(
+      'The server will restart automatically. Your batches and settings are preserved.',
+      {
+        title: 'Update Picasso from v' + info.current_version + ' to v' + info.latest_version + '?',
+        confirmLabel: 'Update',
+      }
     );
     if (!ok) return;
     showOverlay(info);

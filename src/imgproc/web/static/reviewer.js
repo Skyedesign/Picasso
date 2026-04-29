@@ -666,7 +666,7 @@
       }
       updateResetButtonVisibility();
     } catch (e) {
-      alert('Reset failed: ' + e.message);
+      modalAlert(e.message, { title: 'Reset failed', kind: 'danger' });
     } finally {
       for (const b of document.querySelectorAll('.rv-action-btn')) b.disabled = false;
     }
@@ -718,7 +718,7 @@
         foldRerunPanel(/*restoreOutput=*/false);
       }
     } catch (e) {
-      alert('Verdict failed: ' + e.message);
+      modalAlert(e.message, { title: 'Verdict failed', kind: 'danger' });
     } finally {
       for (const b of document.querySelectorAll('.rv-action-btn')) b.disabled = false;
     }
@@ -799,12 +799,15 @@
       if (data.errors && data.errors.length) {
         // Surface partial failures without breaking the flow.
         const sample = data.errors.slice(0, 3).map(e => e.filename + ': ' + e.error).join('\n');
-        alert('Applied to ' + data.applied + ' images. ' + data.errors.length + ' failed:\n\n' + sample);
+        const more = data.errors.length > 3 ? `\n…and ${data.errors.length - 3} more.` : '';
+        modalAlert(sample + more, {
+          title: `Applied to ${data.applied} images, ${data.errors.length} failed`,
+        });
       }
       _selected.clear();
       await load();  // refresh state + grid; re-render preserves _selectMode
     } catch (e) {
-      alert('Bulk ' + decision + ' failed: ' + e.message);
+      modalAlert(e.message, { title: 'Bulk ' + decision + ' failed', kind: 'danger' });
     } finally {
       for (const id of ['rv-bulk-select-visible', 'rv-bulk-done']) $(id).disabled = false;
       updateBulkBar();

@@ -1,0 +1,108 @@
+/* Themed modals — pairs with modals.js. Inherits palette from style.css.
+ * z-index lands above the M3 update banner (5000) so the install
+ * confirm appears on top of the dimmed install overlay. */
+
+.pm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5500;
+  background: rgba(15, 18, 25, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+.pm-overlay.pm-visible { opacity: 1; }
+
+.pm-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: min(440px, 100%);
+  padding: 20px 24px 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.30);
+  transform: translateY(8px);
+  transition: transform 200ms ease-out;
+}
+.pm-overlay.pm-visible .pm-card { transform: translateY(0); }
+.pm-card-danger { border-top: 3px solid var(--bad); }
+
+.pm-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.pm-message {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.pm-message > div + div { margin-top: 6px; }
+
+.pm-input-wrap {
+  margin-bottom: 16px;
+}
+.pm-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 13px;
+  background: white;
+  color: var(--text);
+}
+.pm-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+.pm-input.pm-input-invalid {
+  border-color: var(--bad);
+  outline-color: var(--bad);
+}
+
+.pm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pm-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.pm-btn:hover { background: var(--bg); }
+.pm-btn:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pm-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.pm-btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.pm-btn-danger {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: white;
+}
+.pm-btn-danger:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}

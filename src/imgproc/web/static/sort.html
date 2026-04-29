@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sort · Picasso</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/sort.css">
+  <link rel="stylesheet" href="/static/modals.css">
+</head>
+<body>
+  <div class="sort-header">
+    <a class="back" href="/">← Batches</a>
+    <div class="sort-title">
+      <h1>Sort to SKUs · <span id="sort-batch-name">…</span></h1>
+      <div class="sub">Match every photo to a SKU in the spreadsheet, then write a clean SKU-named copy to <code>processed/sorted/</code>.</div>
+    </div>
+    <div class="sort-summary" id="sort-summary"></div>
+  </div>
+
+  <div class="sort-banner" id="sort-banner" hidden></div>
+
+  <main class="sort-main">
+    <!-- Step 1: pick xlsx + start -->
+    <section class="sort-setup" id="sort-setup">
+      <div class="sort-setup-row">
+        <span class="sort-setup-label">Spreadsheet</span>
+        <select id="sort-xlsx-select">
+          <option value="">— select an xlsx from source/ —</option>
+        </select>
+      </div>
+      <div class="sort-setup-row">
+        <span class="sort-setup-label">Or paste path</span>
+        <input id="sort-xlsx-path" type="text" placeholder="e.g. C:\Users\alida\Documents\2026 BELLS.xlsx">
+        <button id="sort-run-btn" class="primary" type="button">Find matches</button>
+      </div>
+      <details class="sort-tunables">
+        <summary>Matching tunables</summary>
+        <div class="sort-tunable-grid">
+          <label>Strict ≤ <input id="sort-threshold" type="number" min="0" max="64" value="10"></label>
+          <label>Loose ≤ <input id="sort-loose" type="number" min="0" max="64" value="18"></label>
+          <label>Margin ≥ <input id="sort-margin" type="number" min="0" max="32" value="4"></label>
+          <label>Dupe ≤ <input id="sort-dupe" type="number" min="0" max="64" value="10"></label>
+        </div>
+        <div class="sort-tunable-hint">Strict / Loose / Margin govern auto-pick confidence (Hamming distance on pHash). Dupe threshold groups visually-identical photos together.</div>
+      </details>
+    </section>
+
+    <!-- Progress -->
+    <section class="sort-progress" id="sort-progress" hidden>
+      <div class="sort-progress-text" id="sort-progress-text">Loading anchors…</div>
+      <div class="sort-progress-bar"><div class="fill" id="sort-progress-fill"></div></div>
+    </section>
+
+    <!-- Step 2: results -->
+    <section id="sort-results" hidden>
+      <div class="sort-toolbar">
+        <div class="sort-toolbar-chips" id="sort-tier-chips"></div>
+        <div class="sort-toolbar-spacer"></div>
+        <button id="sort-apply-btn" class="primary" type="button">Apply selections</button>
+      </div>
+
+      <details class="sort-dupes" id="sort-dupes" hidden>
+        <summary>Lookalike shots <span id="sort-dupes-count">(0)</span></summary>
+        <div id="sort-dupes-list" class="sort-dupes-list"></div>
+        <div class="sort-dupes-hint">These pairs hash within the dupe threshold of each other. Useful for spotting duplicates before picking a hero.</div>
+      </details>
+
+      <ul id="sort-skus" class="sort-skus"></ul>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span id="app-version">Picasso —</span>
+    <span id="app-update-banner" hidden>
+      <a id="app-update-link" href="#">Update available</a>
+    </span>
+  </footer>
+
+  <template id="sort-sku-tpl">
+    <li class="sort-sku-row">
+      <div class="sort-sku-anchor">
+        <img class="sort-anchor-img" alt="">
+        <div class="sort-anchor-meta">
+          <div class="sort-anchor-sku"></div>
+          <div class="sort-anchor-tier"></div>
+        </div>
+      </div>
+      <div class="sort-candidate-grid"></div>
+    </li>
+  </template>
+
+  <template id="sort-candidate-tpl">
+    <button type="button" class="sort-candidate">
+      <div class="sort-candidate-img"><img alt=""></div>
+      <div class="sort-candidate-meta">
+        <span class="sort-candidate-name"></span>
+        <span class="sort-candidate-distance"></span>
+      </div>
+    </button>
+  </template>
+
+  <script src="/static/modals.js"></script>
+  <script src="/static/sort.js"></script>
+  <script src="/static/update_banner.js"></script>
+</body>
+</html>

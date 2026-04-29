@@ -23,6 +23,7 @@ const els = {
   sourcePickerWrap: document.getElementById('source-picker-wrap'),
   sourcePicker: document.getElementById('source-picker'),
   sourceRootLabel: document.getElementById('source-root-label'),
+  importXlsxPicker: document.getElementById('import-xlsx-picker'),
 };
 
 // ─── Toast ─────────────────────────────────────────────────────────────
@@ -99,6 +100,13 @@ function renderBatches(batches) {
         meta.appendChild(b2);
       }
     }
+    if (b.xlsx_filename) {
+      const x = document.createElement('span');
+      x.className = 'badge xlsx';
+      x.textContent = `📊 ${b.xlsx_filename}`;
+      x.title = 'Working copy of the spreadsheet attached to this batch';
+      meta.appendChild(x);
+    }
 
     row.querySelector('.btn-open').addEventListener('click', () => openBatch(b.name));
     const btnReview = row.querySelector('.btn-review');
@@ -109,6 +117,60 @@ function renderBatches(batches) {
       btnReview.addEventListener('click', () => {
         window.open(`/reviewer/${encodeURIComponent(b.name)}`, '_blank');
       });
+    }
+    // Attach xlsx: only shown for batches WITHOUT one yet. Lets the user
+    // wire an existing batch up to a spreadsheet without re-importing.
+    const btnAttach = row.querySelector('.btn-attach-xlsx');
+    if (!b.xlsx_filename) {
+      btnAttach.hidden = false;
+      btnAttach.addEventListener('click', () => attachXlsxToBatch(b));
+    }
+    // Sheet check: only useful if the batch has its own xlsx attached.
+    // Standalone /sheetcheck still exists for ad-hoc checks against a
+    // pasted path.
+    const btnCheck = row.querySelector('.btn-check');
+    if (b.xlsx_filename) {
+      btnCheck.hidden = false;
+      btnCheck.addEventListener('click', () => {
+        window.open(`/sheetcheck?batch=${encodeURIComponent(b.name)}`, '_blank');
+      });
+    }
+    // Sort: needs candidate images to match against. Show it whenever the
+    // batch has top-level images, regardless of whether it's been processed
+    // — copying falls back to raw if processed/ doesn't exist yet.
+    const btnSort = row.querySelector('.btn-sort');
+    if (b.image_count > 0) {
+      btnSort.hidden = false;
+      btnSort.addEventListener('click', () => {
+        window.open(`/sort/${encodeURIComponent(b.name)}`, '_blank');
+      });
+    }
+    // Send: only meaningful once processed/sorted/ has content. Below the
+    // button we surface the last-sent timestamp + ack status so Alida sees
+    // the round-trip without leaving the batches list.
+    const btnSend = row.querySelector('.btn-send');
+    if (b.sorted_count > 0) {
+      btnSend.hidden = false;
+      btnSend.addEventListener('click', () => sendBatch(b));
+    }
+    // Repeat: needs originals to copy. Show whenever the batch has
+    // top-level images, regardless of whether it's been processed.
+    const btnRepeat = row.querySelector('.btn-repeat');
+    if (b.image_count > 0) {
+      btnRepeat.hidden = false;
+      btnRepeat.addEventListener('click', () => repeatBatch(b));
+    }
+    if (b.last_sent_at || b.pegasus_received_at) {
+      const status = document.createElement('div');
+      status.className = 'batch-send-status';
+      const sentBit = b.last_sent_at
+        ? `<span class="badge sent">Sent ${formatLocalTime(b.last_sent_at)}${b.last_sent_count ? `, ${b.last_sent_count} files` : ''}</span>`
+        : '';
+      const ackBit = b.pegasus_received_at
+        ? `<span class="badge ack">✓ Pegasus received ${formatLocalTime(b.pegasus_received_at)}</span>`
+        : '';
+      status.innerHTML = sentBit + ackBit;
+      meta.appendChild(status);
     }
     const btnReport = row.querySelector('.btn-report');
     if (b.has_report) {
@@ -125,11 +187,17 @@ function renderBatches(batches) {
 }
 
 async function newBatch() {
-  const name = prompt('Batch name (letters, numbers, dash, underscore, space):');
-  if (!name) return;
+  const name = await modalPrompt('Letters, numbers, dash, underscore, space.', {
+    title: 'New batch',
+    placeholder: 'e.g. flowers',
+    pattern: '[A-Za-z0-9 _\\-]+',
+    confirmLabel: 'Create',
+  });
+  const trimmed = (name || '').trim();
+  if (!trimmed) return;
   try {
-    await api('/api/batches', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
-    toast(`Created batch "${name.trim()}"`);
+    await api('/api/batches', { method: 'POST', body: JSON.stringify({ name: trimmed }) });
+    toast(`Created batch "${trimmed}"`);
     await loadBatches();
   } catch (e) {
     toast(e.message, true);
@@ -138,8 +206,25 @@ async function newBatch() {
 
 async function openImportDialog() {
   els.importForm.reset();
-  await populateSourcePicker();
+  await Promise.all([populateSourcePicker(), populateImportXlsxPicker()]);
   els.importDialog.showModal();
+}
+
+async function populateImportXlsxPicker() {
+  if (!els.importXlsxPicker) return;
+  els.importXlsxPicker.innerHTML = '<option value="">— none —</option>';
+  try {
+    const data = await api('/api/sheetcheck/source-files');
+    if (!data.exists || !data.files.length) return;
+    for (const f of data.files) {
+      const opt = document.createElement('option');
+      opt.value = f.path;
+      opt.textContent = `${f.relative} (${f.size_kb} KB)`;
+      els.importXlsxPicker.appendChild(opt);
+    }
+  } catch (e) {
+    // Non-fatal — user can paste a path.
+  }
 }
 
 async function populateSourcePicker() {
@@ -169,10 +254,14 @@ async function populateSourcePicker() {
 async function handleImportSubmit(e) {
   e.preventDefault();
   const data = new FormData(els.importForm);
+  // xlsx_path: text input wins if filled, else the picker dropdown.
+  const xlsxText = (data.get('xlsx_path') || '').toString().trim();
+  const xlsxPath = xlsxText || els.importXlsxPicker?.value || '';
   const payload = {
     source_path: (data.get('source_path') || '').toString().trim(),
     name: (data.get('name') || '').toString().trim(),
     move: data.get('move') === 'on',
+    xlsx_path: xlsxPath || null,
   };
   const submitBtn = els.importForm.querySelector('button[type="submit"]');
   submitBtn.disabled = true;
@@ -184,17 +273,24 @@ async function handleImportSubmit(e) {
     });
     els.importDialog.close();
 
+    const xlsxBit = result.xlsx_attached ? `, xlsx "${result.xlsx_attached}" attached` : '';
     const summary = result.non_white_count
-      ? `Imported ${result.imported} — ${result.non_white_count} have non-white backgrounds`
-      : `Imported ${result.imported} image${result.imported === 1 ? '' : 's'} into "${result.name}"`;
+      ? `Imported ${result.imported}${xlsxBit} — ${result.non_white_count} have non-white backgrounds`
+      : `Imported ${result.imported} image${result.imported === 1 ? '' : 's'}${xlsxBit} into "${result.name}"`;
     toast(summary);
+    if (result.xlsx_error) {
+      toast(`xlsx attach failed: ${result.xlsx_error}`, true);
+    }
 
     if (result.non_white_count > 0) {
       const names = result.non_white_files.join('\n');
-      const were = result.non_white_count === 1 ? 'image has a non-white background' : 'images have non-white backgrounds';
-      alert(
-        `${result.non_white_count} of the ${result.imported} imported ${were}:\n\n${names}\n\n` +
-        `These will be routed to "skipped/" at process time. Use "Open folder" to review or remove them first if you'd like.`
+      const were = result.non_white_count === 1 ? 'image has' : 'images have';
+      await modalAlert(
+        `${names}\n\nThese will be routed to "skipped/" at process time. ` +
+        `Use "Open folder" to review or remove them first if you'd like.`,
+        {
+          title: `${result.non_white_count} of ${result.imported} ${were} a non-white background`,
+        }
       );
     }
 
@@ -215,14 +311,119 @@ async function openBatch(name) {
   }
 }
 
+async function attachXlsxToBatch(b) {
+  // Two-step: pick xlsx → POST attach. The picker is a modalPrompt
+  // pre-seeded with the source/ list, so it works even if Alida's
+  // xlsx isn't under source/ — she can paste any path.
+  let xlsxList = [];
+  try {
+    const data = await api('/api/sheetcheck/source-files');
+    xlsxList = (data.exists && data.files) ? data.files : [];
+  } catch {}
+
+  // Build a hint listing xlsx in source/ — the picker is a single text
+  // field for v1.0 (no need for a full select dialog when paths copy
+  // cleanly from Explorer).
+  const hint = xlsxList.length
+    ? 'Paths in source/:\n' + xlsxList.slice(0, 6).map(f => '  ' + f.path).join('\n') +
+      (xlsxList.length > 6 ? `\n  …and ${xlsxList.length - 6} more` : '')
+    : 'Paste the full path to the xlsx (right-click in Explorer → Copy as path).';
+
+  const path = await modalPrompt(hint, {
+    title: `Attach a spreadsheet to "${b.name}"`,
+    placeholder: 'C:\\Codebase\\Picasso\\source\\... .xlsx',
+    confirmLabel: 'Attach',
+    default: xlsxList[0]?.path || '',
+  });
+  const trimmed = (path || '').trim();
+  if (!trimmed) return;
+
+  try {
+    const r = await api(`/api/batches/${encodeURIComponent(b.name)}/attach-xlsx`, {
+      method: 'POST',
+      body: JSON.stringify({ xlsx_path: trimmed }),
+    });
+    toast(`Attached "${r.xlsx_filename}" to ${b.name}`);
+    await loadBatches();
+  } catch (e) {
+    toast(`Attach failed: ${e.message}`, true);
+  }
+}
+
+async function repeatBatch(b) {
+  try {
+    const r = await api(`/api/batches/${encodeURIComponent(b.name)}/repeat`, { method: 'POST' });
+    const xlsxBit = r.xlsx_attached ? ' + xlsx' : '';
+    toast(`Created "${r.name}" — ${r.image_count} images${xlsxBit} copied from "${r.from}"`);
+    await loadBatches();
+  } catch (e) {
+    toast(`Repeat failed: ${e.message}`, true);
+  }
+}
+
+async function sendBatch(b) {
+  // Confirm only when re-sending a batch that's already been sent —
+  // the first send is unambiguous.
+  if (b.last_sent_at) {
+    const ok = await modalConfirm(
+      `Last sent ${formatLocalTime(b.last_sent_at)}` +
+      (b.last_sent_count ? ` (${b.last_sent_count} files).` : '.') +
+      `\nFiles in the destination will be overwritten.`,
+      {
+        title: `Re-send "${b.name}" to Pegasus?`,
+        confirmLabel: 'Re-send',
+      }
+    );
+    if (!ok) return;
+  }
+  try {
+    const r = await api(`/api/batches/${encodeURIComponent(b.name)}/send`, { method: 'POST' });
+    const xlsxBit = r.xlsx_sent ? ` + ${r.xlsx_sent}` : '';
+    const ackBit = r.pegasus_received_at ? `, Pegasus already acked at ${formatLocalTime(r.pegasus_received_at)}` : '';
+    toast(`Sent ${r.sent_count} files${xlsxBit}${ackBit}`);
+    if (r.xlsx_error) toast(r.xlsx_error, true);
+    await loadBatches();
+  } catch (e) {
+    toast(`Send failed: ${e.message}`, true);
+  }
+}
+
+// HH:MM in the user's locale. Compact on purpose: the badge is meant to be
+// glanceable. ISO timestamps are absolute; the Date constructor handles
+// the timezone shift.
+function formatLocalTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const today = new Date();
+    const sameDay = d.getFullYear() === today.getFullYear()
+                 && d.getMonth() === today.getMonth()
+                 && d.getDate() === today.getDate();
+    if (sameDay) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return d.toLocaleString([], {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
 async function removeBatch(b) {
   // Intentionally explicit — deleting a batch wipes originals, processed/, review/,
   // and the QA report. No undo; user data lives outside this tool.
   const totalImgs = b.image_count + (b.processed_count || 0) + (b.review_count || 0);
   const detail = totalImgs
-    ? `\n\nThis will permanently delete ${totalImgs} file${totalImgs === 1 ? '' : 's'} in the folder.`
-    : '';
-  const ok = confirm(`Remove batch "${b.name}"?${detail}\n\nThis cannot be undone.`);
+    ? `This will permanently delete ${totalImgs} file${totalImgs === 1 ? '' : 's'} in the folder.\nThis cannot be undone.`
+    : 'This cannot be undone.';
+  const ok = await modalConfirm(detail, {
+    title: `Remove batch "${b.name}"?`,
+    kind: 'danger',
+    confirmLabel: 'Remove',
+  });
   if (!ok) return;
   try {
     await api(`/api/batches/${encodeURIComponent(b.name)}`, { method: 'DELETE' });
@@ -420,6 +621,13 @@ const ADVANCED_FIELDS = [
       { value: false, label: 'By shape bounds' },
     ],
   },
+  {
+    key: 'sync_folder',
+    label: 'Send-to-Pegasus folder',
+    hint: 'When you click Send on a batch, Picasso copies its sorted/ files into a subfolder here. Point this at the Syncthing share that mirrors to the warehouse NUC. Leave blank to disable Send.',
+    type: 'text',
+    placeholder: '~/Picasso-to-Pegasus',
+  },
 ];
 
 let currentConfig = null;
@@ -583,6 +791,15 @@ function renderField(f, cfg) {
     line.append(input, unit);
     control.appendChild(line);
     wrap._getters = () => parseFloat(input.value);
+  }
+  else if (f.type === 'text') {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.style.width = '100%';
+    input.placeholder = f.placeholder || '';
+    input.value = cfg[f.key] ?? '';
+    control.appendChild(input);
+    wrap._getters = () => input.value.trim();
   }
   else { // number
     const input = document.createElement('input');

@@ -28,6 +28,9 @@ Thumbs.db
 # Input data — raw images and catalogue spreadsheets live here but don't belong in VCS
 source/
 
+# Sheet-check editable working copies — disposable, per-machine
+scratch/
+
 # Claude Code local settings
 .claude/settings.local.json
 

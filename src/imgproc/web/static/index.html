@@ -5,12 +5,14 @@
   <title>imgproc</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/demo_resizer.css">
+  <link rel="stylesheet" href="/static/modals.css">
 </head>
 <body>
   <header>
     <h1>imgproc</h1>
     <div class="subtitle">Batches root: <code id="root">…</code></div>
     <div class="header-tools">
+      <a id="sheetcheck-launch" href="/sheetcheck" title="Lint a pre-buy spreadsheet for typos and missing fields">🧾 Sheet check</a>
       <button id="demo-launch" type="button" title="Tune the fill ratio on a single image">🎨 Demo Resizer</button>
       <button id="settings-launch" type="button" title="Edit imgproc.yaml defaults">⚙ Settings</button>
     </div>
@@ -74,6 +76,14 @@
         <input name="move" type="checkbox">
         <span>Move the files instead of copying (deletes the originals)</span>
       </label>
+      <div class="dialog-field" id="import-xlsx-wrap">
+        <span>Spreadsheet (optional)</span>
+        <select id="import-xlsx-picker">
+          <option value="">— none —</option>
+        </select>
+        <input name="xlsx_path" type="text" placeholder="or paste an xlsx path">
+        <small>Copies the xlsx into the batch as a working copy. Sheet check, Sort and Send all use it. Source xlsx stays untouched.</small>
+      </div>
       <div class="dialog-actions">
         <button type="button" id="import-cancel">Cancel</button>
         <button type="submit" class="primary">Import</button>
@@ -90,6 +100,11 @@
       <div class="batch-actions">
         <button class="btn-open">Open folder</button>
         <button class="btn-review" hidden>Review</button>
+        <button class="btn-attach-xlsx" hidden title="Attach a spreadsheet to this batch as a working copy">📊 Attach xlsx</button>
+        <button class="btn-check" hidden title="Lint this batch's spreadsheet for typos and missing fields">Sheet check</button>
+        <button class="btn-sort" hidden title="Match photos to SKUs from a spreadsheet">Sort</button>
+        <button class="btn-send" hidden title="Copy processed/sorted/ to the configured Pegasus sync folder">Send</button>
+        <button class="btn-repeat" hidden title="Create a sibling batch with originals + previous run's settings, ready to re-process">Repeat</button>
         <button class="btn-report" hidden>Open report</button>
         <button class="btn-process primary">Process</button>
         <button class="btn-remove danger" title="Delete this batch and all its contents">Remove</button>
@@ -207,6 +222,7 @@
     </div>
   </div>
 
+  <script src="/static/modals.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/demo_resizer.js"></script>
   <script src="/static/update_banner.js"></script>

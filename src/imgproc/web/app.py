@@ -47,13 +47,40 @@ from ..cli import IMAGE_EXTS, process_folder
 from ..config import Config, find_project_root, load_config
 from ..engine import detect_product, normalize_to_canvas
 from ..engine.background import detect_background
+from ..ingest.sortlib import (
+    Anchor,
+    Candidate,
+    DupeCluster,
+    Match,
+    find_dupe_clusters,
+    hash_candidates,
+    load_anchors_from_xlsx,
+    rank_candidates_per_sku,
+)
 from ..output import status_subfolder
+from ..sheetcheck import (
+    Suppressions,
+    apply_suppressions,
+    load_suffixes,
+    parse_sheet,
+    read_suppressions,
+    run_rules,
+    suppression_path,
+    write_suppressions,
+)
 from ..updater import check_for_update, perform_swap
 
 STATIC = Path(__file__).parent / "static"
 _PROJECT_ROOT = find_project_root()
 BATCHES_ROOT = (_PROJECT_ROOT / "batches").resolve()
 CONFIG_PATH = _PROJECT_ROOT / "imgproc.yaml"
+SUFFIXES_PATH = _PROJECT_ROOT / "picasso-suffixes.yaml"
+# Scratch dir for editable working copies of xlsx files outside the
+# batch flow — Sheet check's "Make editable copy" lands here so Apply
+# fixes can be written without touching source/. Lives alongside
+# batches/ at project root so it's visible in Explorer and easy to
+# clean up; gitignored at the repo level (no checked-in working files).
+SCRATCH_ROOT = (_PROJECT_ROOT / "scratch" / "sheetcheck").resolve()
 BATCHES_ROOT.mkdir(exist_ok=True)
 
 # Conservative: alphanumerics, dash, underscore, space. Prevents path traversal and
@@ -105,6 +132,25 @@ def reviewer_page(name: str) -> str:
     return (STATIC / "reviewer.html").read_text(encoding="utf-8")
 
 
+@app.get("/sheetcheck", response_class=HTMLResponse)
+def sheetcheck_page() -> str:
+    """Sheet check (xlsx linter) page. The file picker + run button are
+    JS-driven against the /api/sheetcheck/* endpoints below."""
+    return (STATIC / "sheetcheck.html").read_text(encoding="utf-8")
+
+
+@app.get("/sort/{name}", response_class=HTMLResponse)
+def sort_page(name: str) -> str:
+    """Visual SKU-matching tool for one batch. Loads anchors from a
+    user-chosen xlsx + bbox-pHashes the batch's images + lets the user
+    pick a hero per SKU. Output goes to {batch}/processed/sorted/.
+    Same JS for any valid batch name; client fetches state via
+    /api/sort/* endpoints."""
+    if not _NAME_RE.match(name):
+        raise HTTPException(400, "invalid batch name")
+    return (STATIC / "sort.html").read_text(encoding="utf-8")
+
+
 # ─── Batches ──────────────────────────────────────────────────────────────
 
 @app.get("/api/batches")
@@ -120,22 +166,40 @@ def list_batches() -> dict:
         has_report = (folder / "report.html").exists()
         processed_count = 0
         review_count = 0
+        sorted_count = 0
         if (folder / "processed").is_dir():
             processed_count = sum(
                 1 for p in (folder / "processed").iterdir()
-                if p.suffix.lower() in IMAGE_EXTS
+                if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+            )
+        sorted_dir = folder / "processed" / "sorted"
+        if sorted_dir.is_dir():
+            sorted_count = sum(
+                1 for p in sorted_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in IMAGE_EXTS
             )
         if (folder / "review").is_dir():
             review_count = sum(
                 1 for p in (folder / "review").iterdir()
                 if p.suffix.lower() in IMAGE_EXTS
             )
+        # Send-state fields come from the sidecar; absent for legacy /
+        # never-sent batches (None ⇒ UI shows "Never sent").
+        meta = read_meta(folder)
+        xlsx_filename: str | None = None
+        if meta and meta.xlsx_filename and (folder / meta.xlsx_filename).is_file():
+            xlsx_filename = meta.xlsx_filename
         items.append({
             "name": folder.name,
             "image_count": n_images,
             "has_report": has_report,
             "processed_count": processed_count,
             "review_count": review_count,
+            "sorted_count": sorted_count,
+            "xlsx_filename": xlsx_filename,
+            "last_sent_at": meta.last_sent_at if meta else None,
+            "last_sent_count": meta.last_sent_count if meta else None,
+            "pegasus_received_at": meta.pegasus_received_at if meta else None,
         })
     return {"root": str(BATCHES_ROOT), "batches": items}
 
@@ -199,6 +263,10 @@ class ImportRequest(BaseModel):
     name: str
     source_path: str
     move: bool = False  # if True, move the source files; otherwise copy
+    # Optional xlsx to attach to the batch in one step. Always copied
+    # (never moved) — keeping the source xlsx pristine is the whole
+    # point of the cleanup-workspace pattern.
+    xlsx_path: str | None = None
 
 
 @app.post("/api/batches/import")
@@ -264,12 +332,33 @@ def import_folder(body: ImportRequest) -> dict:
         target.rmdir()
         raise HTTPException(400, "no image files (.jpg, .png, .webp, .bmp) found in source folder")
 
+    # Optional xlsx attach. Done last so an xlsx-validation failure doesn't
+    # require unwinding the image import. Failure here is non-fatal: the
+    # batch still has its images; the user can re-attach via the dedicated
+    # endpoint later.
+    xlsx_attached: str | None = None
+    xlsx_error: str | None = None
+    if body.xlsx_path:
+        try:
+            src_xlsx = _resolve_xlsx_path(body.xlsx_path)
+            shutil.copy2(src_xlsx, target / src_xlsx.name)
+            meta = read_meta(target) or BatchMeta(batch_name=name)
+            meta.xlsx_filename = src_xlsx.name
+            write_meta(target, meta)
+            xlsx_attached = src_xlsx.name
+        except HTTPException as e:
+            xlsx_error = e.detail
+        except OSError as e:
+            xlsx_error = f"copy failed: {e}"
+
     return {
         "name": name,
         "imported": imported,
         "moved": body.move,
         "non_white_count": len(non_white),
         "non_white_files": non_white,
+        "xlsx_attached": xlsx_attached,
+        "xlsx_error": xlsx_error,
     }
 
 
@@ -281,6 +370,172 @@ def delete_batch(name: str) -> dict:
     folder = _resolve_batch(name)
     shutil.rmtree(folder)
     return {"ok": True, "deleted": name}
+
+
+def _batch_xlsx_path(folder: Path, meta: BatchMeta | None = None) -> Path | None:
+    """Where this batch's working xlsx lives, if any.
+
+    Sidecar-tracked: `BatchMeta.xlsx_filename` is the canonical record.
+    Returns None for batches without an attached xlsx (legacy + un-set).
+    Re-reads the sidecar when caller doesn't provide one.
+    """
+    if meta is None:
+        meta = read_meta(folder)
+    if not meta or not meta.xlsx_filename:
+        return None
+    p = folder / meta.xlsx_filename
+    if not p.is_file():
+        return None
+    return p
+
+
+class AttachXlsxRequest(BaseModel):
+    xlsx_path: str
+    overwrite: bool = False
+
+
+@app.post("/api/batches/{name}/attach-xlsx")
+def attach_xlsx(name: str, body: AttachXlsxRequest) -> dict:
+    """Copy an external xlsx into this batch as the working copy.
+
+    Stores under `{batch}/{xlsx_filename}` — name preserved so Alida
+    recognises it on disk. The sidecar's `xlsx_filename` field becomes
+    the source of truth for "this batch has an xlsx"; downstream
+    features (Sheet check write-back, Visual Sort, Send) read it.
+
+    Refuses to overwrite an existing attached xlsx unless `overwrite`
+    is true — the on-disk copy may have edits Alida hasn't synced
+    elsewhere yet.
+    """
+    folder = _resolve_batch(name)
+    src = _resolve_xlsx_path(body.xlsx_path)
+
+    meta = read_meta(folder) or BatchMeta(batch_name=name)
+    if meta.xlsx_filename and not body.overwrite:
+        existing = folder / meta.xlsx_filename
+        if existing.is_file():
+            raise HTTPException(
+                409,
+                f"batch already has {meta.xlsx_filename}; pass overwrite=true to replace",
+            )
+
+    dest = folder / src.name
+    try:
+        shutil.copy2(src, dest)
+    except OSError as e:
+        raise HTTPException(500, f"copy failed: {e}")
+
+    meta.xlsx_filename = src.name
+    write_meta(folder, meta)
+    return {"ok": True, "xlsx_filename": src.name, "path": str(dest)}
+
+
+_REPEAT_SUFFIX_RE = re.compile(r"^(?P<base>.+?)-v(?P<n>\d+)$")
+
+
+def _next_repeat_name(base_name: str) -> str:
+    """Pick the first free `{root}-vN` slot.
+
+    If `base_name` is `flowers`, the first sibling is `flowers-v2`,
+    next `flowers-v3`, …. If it already ends in `-vN` we keep the
+    same root and increment, so repeating `flowers-v2` produces
+    `flowers-v3` — not `flowers-v2-v2`. Up to v999 just so the loop
+    terminates; nobody's going to repeat 1000 times.
+    """
+    m = _REPEAT_SUFFIX_RE.match(base_name)
+    if m:
+        root = m.group("base")
+        start = int(m.group("n")) + 1
+    else:
+        root = base_name
+        start = 2
+    for n in range(start, 1000):
+        cand = f"{root}-v{n}"
+        if not (BATCHES_ROOT / cand).exists():
+            return cand
+    raise HTTPException(500, "ran out of repeat suffixes (>=1000); time to clean up")
+
+
+@app.post("/api/batches/{name}/repeat")
+def repeat_batch(name: str) -> dict:
+    """Create a sibling batch with the source's originals + config.
+
+    Copies (never moves):
+      • top-level image originals (the inputs, not processing output)
+      • `folder.yaml` if present (preserves per-batch tuning)
+      • the attached xlsx if any (so the new run starts from the same
+        cleaned spreadsheet — re-doing the visual sort is the
+        expected use case)
+
+    Skips: `processed/`, `review/`, `skipped/`, `report.html`,
+    `_report_assets/`, `batch.json`. Those are outputs of the previous
+    run; the new batch starts fresh and will re-create them on Process.
+
+    The source batch is NOT modified.
+    """
+    src_folder = _resolve_batch(name)
+    new_name = _next_repeat_name(name)
+    dst_folder = BATCHES_ROOT / new_name
+    if dst_folder.exists():  # paranoia — _next_repeat_name should have prevented this
+        raise HTTPException(409, f"sibling {new_name} already exists")
+
+    dst_folder.mkdir()
+    n_images = 0
+    n_xlsx = 0
+    try:
+        # Top-level originals only.
+        for p in src_folder.iterdir():
+            if not p.is_file():
+                continue
+            if p.suffix.lower() in IMAGE_EXTS:
+                shutil.copy2(p, dst_folder / p.name)
+                n_images += 1
+            elif p.name == "folder.yaml":
+                shutil.copy2(p, dst_folder / p.name)
+        # Attached xlsx — read filename from sidecar (single source of truth)
+        # rather than guessing by extension, since other xlsx files near
+        # the batch wouldn't be ours to copy.
+        src_meta = read_meta(src_folder)
+        xlsx_filename: str | None = None
+        if src_meta and src_meta.xlsx_filename:
+            xlsx_src = src_folder / src_meta.xlsx_filename
+            if xlsx_src.is_file():
+                shutil.copy2(xlsx_src, dst_folder / xlsx_src.name)
+                xlsx_filename = xlsx_src.name
+                n_xlsx = 1
+    except Exception:
+        # Roll back the half-built sibling so the user isn't left with a
+        # phantom empty batch.
+        shutil.rmtree(dst_folder, ignore_errors=True)
+        raise
+
+    if n_images == 0:
+        # Empty source ⇒ pointless to repeat. Clean up + 400 so the UI
+        # can show a clear message.
+        shutil.rmtree(dst_folder, ignore_errors=True)
+        raise HTTPException(
+            400,
+            f"batch {name} has no top-level images to repeat",
+        )
+
+    # Sidecar for the new batch: only carry forward xlsx_filename + the
+    # last_run_config snapshot (so the user can see what knobs the
+    # previous run used). Leave verdicts, run timestamp, send-state out
+    # — the new batch hasn't done any of those things yet.
+    new_meta = BatchMeta(batch_name=new_name)
+    if xlsx_filename:
+        new_meta.xlsx_filename = xlsx_filename
+    if src_meta and src_meta.last_run_config:
+        new_meta.last_run_config = dict(src_meta.last_run_config)
+    write_meta(dst_folder, new_meta)
+
+    return {
+        "ok": True,
+        "name": new_name,
+        "image_count": n_images,
+        "xlsx_attached": bool(n_xlsx),
+        "from": name,
+    }
 
 
 @app.post("/api/batches/{name}/open")
@@ -1167,6 +1422,842 @@ def apply_preset(name: str, body: ApplyPresetRequest) -> dict:
 
     folder_yaml.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return {"ok": True, "folder_yaml": str(folder_yaml), "saved": data}
+
+
+# ─── Sheet check (xlsx linter) ────────────────────────────────────────────
+# Read-only flagging of common spreadsheet errors before Alida hands an
+# xlsx off downstream. Suppressions are persisted next to the xlsx file
+# itself (not in the project) so they travel with the workbook.
+
+def _resolve_xlsx_path(raw: str) -> Path:
+    """Validate + canonicalise a user-supplied xlsx path.
+
+    The path can sit anywhere on Alida's filesystem (we don't enforce a
+    chroot — `import_folder` doesn't either, and this is a single-user
+    local UI). What we do enforce: it must exist, be a file, end in
+    `.xlsx`, and not be a temporary `~$lockfile`."""
+    s = (raw or "").strip().strip('"').strip("'")
+    if not s:
+        raise HTTPException(400, "xlsx path is required")
+    p = Path(s).expanduser()
+    if not p.exists() or not p.is_file():
+        raise HTTPException(400, f"file not found: {p}")
+    if p.suffix.lower() != ".xlsx":
+        raise HTTPException(400, "file must have a .xlsx extension")
+    if p.name.startswith("~$"):
+        raise HTTPException(400, "this looks like an Excel lockfile (~$); pick the real file")
+    return p
+
+
+@app.get("/api/sheetcheck/source-files")
+def list_source_xlsx() -> dict:
+    """Enumerate .xlsx files under source/ for the picker. Mirrors
+    `list_source_folders` — same shape, different filter."""
+    source_root = (_PROJECT_ROOT / "source").resolve()
+    if not source_root.is_dir():
+        return {"root": str(source_root), "exists": False, "files": []}
+    files = []
+    for p in sorted(source_root.rglob("*.xlsx")):
+        if p.name.startswith("~$"):
+            continue
+        try:
+            rel = p.relative_to(source_root)
+        except ValueError:
+            continue
+        files.append({
+            "path": str(p),
+            "relative": str(rel),
+            "size_kb": round(p.stat().st_size / 1024, 1),
+        })
+    return {"root": str(source_root), "exists": True, "files": files}
+
+
+class SheetcheckRunRequest(BaseModel):
+    xlsx_path: str
+
+
+@app.post("/api/sheetcheck/run")
+def sheetcheck_run(body: SheetcheckRunRequest) -> dict:
+    """Parse the xlsx, run rules, return findings split into visible /
+    suppressed (per the sidecar). Read-only.
+    """
+    xlsx_path = _resolve_xlsx_path(body.xlsx_path)
+    try:
+        parsed = parse_sheet(xlsx_path)
+    except Exception as e:
+        # parse_sheet wraps zip / corruption errors in RuntimeError —
+        # surface as 422 so the UI can show a friendly message.
+        raise HTTPException(422, f"could not read xlsx: {e}")
+    suffixes = load_suffixes(SUFFIXES_PATH)
+    findings = run_rules(parsed, suffixes)
+    sup = read_suppressions(xlsx_path)
+    visible, suppressed = apply_suppressions(findings, sup)
+    return {
+        "xlsx_path": str(xlsx_path),
+        "sheet_name": parsed.sheet_name,
+        "header_row": parsed.header_row,
+        "columns": parsed.columns,
+        "n_variants": len(parsed.variants),
+        "n_images": sum(parsed.images_by_row.values()),
+        "parse_warnings": parsed.parse_warnings,
+        "suffix_count": len(suffixes.entries),
+        "findings": [f.to_dict() for f in visible],
+        "suppressed": [f.to_dict() for f in suppressed],
+        "muted_findings": sorted(sup.muted_findings),
+        "muted_rules": sorted(sup.muted_rules),
+        "suppression_sidecar": str(suppression_path(xlsx_path)),
+        # `writable` tells the UI whether to surface "Apply" buttons —
+        # batch-local xlsx files OR scratch working copies are editable.
+        "writable": _is_writable_xlsx(xlsx_path),
+        # `is_scratch` lets the UI swap "Make editable copy" for
+        # "Save back to source" once a working copy has been opened.
+        "is_scratch": _is_inside_scratch(xlsx_path),
+        # When the loaded path is in scratch, surface the original
+        # source so save-back can target it without the user re-typing.
+        "scratch_origin": (
+            _read_scratch_origin(xlsx_path) if _is_inside_scratch(xlsx_path) else None
+        ),
+    }
+
+
+class SheetcheckSuppressRequest(BaseModel):
+    xlsx_path: str
+    target: Literal["finding", "rule"]
+    key: str                  # suppression_key for "finding"; rule id for "rule"
+    action: Literal["mute", "unmute"]
+
+
+def _is_inside_batches(p: Path) -> bool:
+    """True if `p` resolves to a path inside BATCHES_ROOT."""
+    try:
+        p.resolve().relative_to(BATCHES_ROOT)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_inside_scratch(p: Path) -> bool:
+    """True if `p` resolves to a path inside SCRATCH_ROOT."""
+    try:
+        p.resolve().relative_to(SCRATCH_ROOT)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_writable_xlsx(p: Path) -> bool:
+    """Whether Sheet check is allowed to write to this path.
+
+    Two writable locations:
+      - inside `batches/` — the canonical pre-Pegasus workspace.
+      - inside `scratch/sheetcheck/` — standalone working copies for
+        the "Make editable copy" flow on xlsx files that haven't been
+        imported into a batch yet.
+
+    Source xlsx in `source/` (or anywhere else on disk) stays
+    read-only by policy. This guard is what enforces it.
+    """
+    return _is_inside_batches(p) or _is_inside_scratch(p)
+
+
+# Sidecar tracking the original source path of a scratch copy. Lets
+# "Save back to source" know where to write without the user re-typing.
+_SCRATCH_SIDECAR_SUFFIX = ".picasso-source.json"
+
+
+def _scratch_sidecar(scratch_xlsx: Path) -> Path:
+    return scratch_xlsx.with_name(scratch_xlsx.name + _SCRATCH_SIDECAR_SUFFIX)
+
+
+def _read_scratch_origin(scratch_xlsx: Path) -> dict | None:
+    p = _scratch_sidecar(scratch_xlsx)
+    if not p.is_file():
+        return None
+    try:
+        import json
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_scratch_origin(scratch_xlsx: Path, source_path: Path) -> None:
+    import json
+    payload = {
+        "source_path": str(source_path),
+        "scratch_created_at": now_iso(),
+        "source_mtime_at_copy": source_path.stat().st_mtime,
+    }
+    _scratch_sidecar(scratch_xlsx).write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+
+
+class SheetcheckApplyFixRequest(BaseModel):
+    xlsx_path: str
+    row: int                  # 1-indexed
+    column: int               # 1-indexed
+    value: str
+    expected_old: str | None = None  # if provided, refuse the fix when the cell already differs
+
+
+@app.post("/api/sheetcheck/apply-fix")
+def sheetcheck_apply_fix(body: SheetcheckApplyFixRequest) -> dict:
+    """Write a single cell value into the xlsx and save.
+
+    Only allowed for xlsx files inside `batches/` — the master copy in
+    `source/` is read-only by policy. Returns the updated cell so the
+    UI can confirm the write went through.
+
+    `expected_old` is an optional sanity check: if the user sees the
+    finding for "RED" but the cell now says something else (file
+    edited externally between linter runs), refuse to clobber it. The
+    UI surfaces that as "the cell changed; re-run the check".
+    """
+    xlsx_path = _resolve_xlsx_path(body.xlsx_path)
+    if not _is_writable_xlsx(xlsx_path):
+        raise HTTPException(
+            403,
+            "fixes can only be applied to a batch's xlsx or a scratch working copy; "
+            "the source xlsx is read-only",
+        )
+    if body.row < 1 or body.column < 1:
+        raise HTTPException(400, "row and column must be 1-indexed positive integers")
+
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(xlsx_path)  # writable mode
+    except Exception as e:
+        raise HTTPException(422, f"could not open {xlsx_path.name}: {e}")
+    ws = wb["Sheet1"] if "Sheet1" in wb.sheetnames else wb.active
+    cell = ws.cell(row=body.row, column=body.column)
+    if body.expected_old is not None:
+        current = "" if cell.value is None else str(cell.value).strip()
+        if current.upper() != body.expected_old.strip().upper():
+            wb.close()
+            raise HTTPException(
+                409,
+                f"cell already changed (now \"{current}\", expected \"{body.expected_old}\") — re-run check",
+            )
+    old_value = cell.value
+    cell.value = body.value
+    try:
+        wb.save(xlsx_path)
+    except OSError as e:
+        wb.close()
+        raise HTTPException(500, f"save failed: {e}")
+    wb.close()
+    return {
+        "ok": True,
+        "row": body.row,
+        "column": body.column,
+        "old_value": old_value,
+        "new_value": body.value,
+    }
+
+
+class SheetcheckEditCopyRequest(BaseModel):
+    xlsx_path: str
+    overwrite: bool = False
+
+
+@app.post("/api/sheetcheck/edit-copy")
+def sheetcheck_edit_copy(body: SheetcheckEditCopyRequest) -> dict:
+    """Make an editable scratch copy of a (read-only) source xlsx.
+
+    Lets Alida fix typos in a master spreadsheet without first
+    creating a Picasso batch. The scratch copy lands in
+    `scratch/sheetcheck/{name}.xlsx` and is what the UI loads after
+    this endpoint returns; Apply buttons unlock automatically because
+    `_is_writable_xlsx` covers the scratch root.
+
+    Refuses (409) when a same-named scratch copy already exists, to
+    protect work-in-progress fixes. Pass `overwrite=true` to clobber
+    intentionally.
+    """
+    src = _resolve_xlsx_path(body.xlsx_path)
+    if _is_inside_scratch(src):
+        raise HTTPException(400, "source path is already inside scratch/")
+
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    dest = SCRATCH_ROOT / src.name
+    if dest.exists() and not body.overwrite:
+        existing_origin = _read_scratch_origin(dest) or {}
+        prior_src = existing_origin.get("source_path", "(unknown)")
+        raise HTTPException(
+            409,
+            f"scratch already has {dest.name} (from \"{prior_src}\"); "
+            f"finish save-back first or pass overwrite=true",
+        )
+
+    try:
+        shutil.copy2(src, dest)
+        _write_scratch_origin(dest, src)
+    except OSError as e:
+        # Clean partial state so a retry doesn't trip the overwrite guard.
+        try: dest.unlink(missing_ok=True)
+        except OSError: pass
+        raise HTTPException(500, f"copy failed: {e}")
+
+    return {
+        "ok": True,
+        "scratch_path": str(dest),
+        "source_path": str(src),
+    }
+
+
+class SheetcheckPromoteRequest(BaseModel):
+    scratch_path: str
+    # Optional override; defaults to the source path saved at copy
+    # time. Useful only when the user moved the master xlsx between
+    # making the working copy and saving back.
+    source_path: str | None = None
+    # Bypass the mtime drift check. The UI surfaces a confirm dialog
+    # before passing this; we don't blanket-allow.
+    force: bool = False
+
+
+@app.post("/api/sheetcheck/promote-to-source")
+def sheetcheck_promote_to_source(body: SheetcheckPromoteRequest) -> dict:
+    """Copy the scratch working copy back over the original source.
+
+    Drift guard: if the source's mtime has advanced since the scratch
+    copy was made, the user almost certainly edited it in Excel
+    meanwhile. Refuse with 409 unless `force=true` so save-back never
+    silently clobbers Excel edits.
+
+    On success, deletes the scratch copy + its sidecar so the next
+    edit-copy starts fresh.
+    """
+    scratch = _resolve_xlsx_path(body.scratch_path)
+    if not _is_inside_scratch(scratch):
+        raise HTTPException(400, "scratch_path must be a working copy under scratch/")
+
+    origin = _read_scratch_origin(scratch) or {}
+    target_str = body.source_path or origin.get("source_path")
+    if not target_str:
+        raise HTTPException(
+            422,
+            "no source_path recorded for this scratch copy; "
+            "pass source_path explicitly",
+        )
+    target = Path(target_str).expanduser()
+    if not target.parent.is_dir():
+        raise HTTPException(400, f"source folder not found: {target.parent}")
+    if target.suffix.lower() != ".xlsx":
+        raise HTTPException(400, "source path must end in .xlsx")
+
+    # Drift check.
+    if target.exists() and not body.force:
+        original_mtime = origin.get("source_mtime_at_copy")
+        current_mtime = target.stat().st_mtime
+        if (
+            isinstance(original_mtime, (int, float))
+            and current_mtime > original_mtime + 0.5  # 0.5s tolerance for FS jitter
+        ):
+            raise HTTPException(
+                409,
+                f"source xlsx changed on disk since the working copy was made — "
+                f"pass force=true to overwrite anyway, or discard the scratch copy",
+            )
+
+    try:
+        shutil.copy2(scratch, target)
+    except OSError as e:
+        raise HTTPException(500, f"save-back failed: {e}")
+
+    # Clean up scratch copy + sidecar — the work has been promoted, the
+    # working copy has served its purpose.
+    try: scratch.unlink()
+    except OSError: pass
+    try: _scratch_sidecar(scratch).unlink()
+    except OSError: pass
+
+    return {
+        "ok": True,
+        "saved_to": str(target),
+        "scratch_cleared": True,
+    }
+
+
+@app.post("/api/sheetcheck/suppress")
+def sheetcheck_suppress(body: SheetcheckSuppressRequest) -> dict:
+    """Toggle a per-finding or per-rule mute. Persists to the sidecar
+    next to the xlsx — failing that (read-only path) we return a soft
+    error so the UI can keep the in-memory mute without crashing."""
+    xlsx_path = _resolve_xlsx_path(body.xlsx_path)
+    sup = read_suppressions(xlsx_path)
+    target_set = sup.muted_findings if body.target == "finding" else sup.muted_rules
+    if body.action == "mute":
+        target_set.add(body.key)
+    else:
+        target_set.discard(body.key)
+    try:
+        path = write_suppressions(xlsx_path, sup)
+        return {
+            "ok": True,
+            "sidecar": str(path),
+            "muted_findings": sorted(sup.muted_findings),
+            "muted_rules": sorted(sup.muted_rules),
+        }
+    except OSError as e:
+        # Don't 500 — just tell the UI the mute didn't persist. Common case
+        # is a read-only network share.
+        return {
+            "ok": False,
+            "error": f"could not write {suppression_path(xlsx_path).name}: {e}",
+            "muted_findings": sorted(sup.muted_findings),
+            "muted_rules": sorted(sup.muted_rules),
+        }
+
+
+# ─── Visual sort (M5) ─────────────────────────────────────────────────────
+# Anchor-load + candidate-hash is heavy (~50 ms/image for bbox-cropped
+# pHash on a 12 MP source), so this runs as a background job behind a
+# poll-able status endpoint. The job's full result (anchor list, ranked
+# matches, dupe clusters) is cached server-side keyed by job_id; the
+# apply step replays it without recomputing.
+
+_sort_jobs: dict[str, dict] = {}
+_sort_jobs_lock = threading.Lock()
+_SORT_TOP_K = 6  # candidates per SKU shown in the picker
+
+
+def _sort_progress(job_id: str, **fields) -> None:
+    with _sort_jobs_lock:
+        job = _sort_jobs.get(job_id)
+        if job is not None:
+            job["progress"].update(fields)
+
+
+class SortRunRequest(BaseModel):
+    xlsx_path: str
+    batch_name: str
+    threshold: int = 10
+    loose_threshold: int = 18
+    min_margin: int = 4
+    dupe_threshold: int = 10
+
+
+@app.post("/api/sort/run")
+def sort_run(body: SortRunRequest) -> dict:
+    """Kick off a sort job. Returns a job_id immediately; poll
+    `/api/sort/jobs/{id}` for status and result."""
+    folder = _resolve_batch(body.batch_name)
+    xlsx_path = _resolve_xlsx_path(body.xlsx_path)
+
+    # Snapshot the candidate set up front. Top-level only; we sort the
+    # raws Alida photographed, not the resized outputs.
+    candidate_paths = sorted(
+        p for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+    )
+    if not candidate_paths:
+        raise HTTPException(400, f"batch {body.batch_name} has no top-level images")
+
+    job_id = uuid.uuid4().hex
+    with _sort_jobs_lock:
+        _sort_jobs[job_id] = {
+            "status": "running",
+            "batch_name": body.batch_name,
+            "xlsx_path": str(xlsx_path),
+            "progress": {
+                "phase": "starting",
+                "current": 0,
+                "total": len(candidate_paths),
+            },
+            "result": None,
+            "error": None,
+        }
+
+    def run() -> None:
+        try:
+            _sort_progress(job_id, phase="anchors", current=0, total=0)
+            anchors = load_anchors_from_xlsx(xlsx_path)
+            if not anchors:
+                raise RuntimeError("no anchor images found in xlsx")
+
+            _sort_progress(job_id, phase="hashing", current=0, total=len(candidate_paths))
+
+            def cand_progress(done: int, total: int) -> None:
+                _sort_progress(job_id, phase="hashing", current=done, total=total)
+
+            candidates = hash_candidates(
+                candidate_paths, use_bbox_crop=True, progress=cand_progress,
+            )
+
+            _sort_progress(job_id, phase="ranking", current=0, total=len(anchors))
+            ranked = rank_candidates_per_sku(
+                anchors, candidates,
+                threshold=body.threshold,
+                loose_threshold=body.loose_threshold,
+                min_margin=body.min_margin,
+                top_k=_SORT_TOP_K,
+            )
+            _sort_progress(job_id, phase="dupes", current=0, total=0)
+            dupes = find_dupe_clusters(candidates, threshold=body.dupe_threshold)
+
+            with _sort_jobs_lock:
+                job = _sort_jobs[job_id]
+                job["anchors"] = anchors           # Anchor objects (kept for thumb endpoint)
+                job["ranked"] = ranked             # dict[str, list[Match]]
+                job["dupes"] = dupes
+                job["candidate_paths"] = [p.name for p in candidate_paths]
+                job["status"] = "done"
+                job["progress"] = {
+                    "phase": "done",
+                    "current": len(candidate_paths),
+                    "total": len(candidate_paths),
+                }
+        except Exception as e:
+            with _sort_jobs_lock:
+                job = _sort_jobs.get(job_id)
+                if job is not None:
+                    job["status"] = "error"
+                    job["error"] = f"{type(e).__name__}: {e}"
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/sort/jobs/{job_id}")
+def sort_job(job_id: str) -> dict:
+    """Lightweight status poll. Returns progress + status; the full
+    result (which contains big data) is fetched separately via
+    /api/sort/result/{id} once status == 'done'."""
+    with _sort_jobs_lock:
+        job = _sort_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "sort job not found")
+        return {
+            "status": job["status"],
+            "batch_name": job["batch_name"],
+            "xlsx_path": job["xlsx_path"],
+            "progress": dict(job["progress"]),
+            "error": job["error"],
+        }
+
+
+@app.get("/api/sort/result/{job_id}")
+def sort_result(job_id: str) -> dict:
+    """Full result payload — ranked candidates per SKU, dupe clusters,
+    candidate-path list. Anchor thumbnails are served separately via
+    /api/sort/anchor/{id}/{sku} so the JSON stays compact."""
+    with _sort_jobs_lock:
+        job = _sort_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "sort job not found")
+        if job["status"] != "done":
+            raise HTTPException(409, f"job not done: {job['status']}")
+        anchors: list[Anchor] = job["anchors"]
+        ranked: dict[str, list[Match]] = job["ranked"]
+        dupes: list[DupeCluster] = job["dupes"]
+        candidate_paths: list[str] = job["candidate_paths"]
+    skus_payload = []
+    for a in anchors:
+        matches = ranked.get(a.sku, [])
+        skus_payload.append({
+            "sku": a.sku,
+            "row": a.row,
+            "tier": matches[0].tier if matches else "weak",
+            "matches": [
+                {
+                    "filename": m.candidate.name,
+                    "distance": m.distance,
+                    "rank": m.rank,
+                }
+                for m in matches
+            ],
+        })
+    dupes_payload = [
+        {
+            "files": [p.name for p in c.paths],
+            "distances": list(c.distances),
+        }
+        for c in dupes
+    ]
+    return {
+        "batch_name": job["batch_name"],
+        "xlsx_path": job["xlsx_path"],
+        "skus": skus_payload,
+        "dupes": dupes_payload,
+        "candidates": candidate_paths,
+    }
+
+
+@app.get("/api/sort/anchor/{job_id}/{sku}")
+def sort_anchor(job_id: str, sku: str) -> Response:
+    """Serve a SKU's anchor thumbnail. Stable while the job lives in
+    memory; once the job is reaped the URL 404s."""
+    with _sort_jobs_lock:
+        job = _sort_jobs.get(job_id)
+        if job is None or job["status"] != "done":
+            raise HTTPException(404, "sort job not found")
+        anchors: list[Anchor] = job["anchors"]
+    for a in anchors:
+        if a.sku == sku:
+            return Response(content=a.image_bytes, media_type="image/jpeg")
+    raise HTTPException(404, "sku not in this job")
+
+
+class SortMapping(BaseModel):
+    sku: str
+    hero: str | None = None       # filename at batch top-level; None = skip this SKU
+    extras: list[str] = Field(default_factory=list)
+
+
+class SortApplyRequest(BaseModel):
+    job_id: str
+    mappings: list[SortMapping]
+    overwrite: bool = True   # if False, skip SKUs whose target already exists
+
+
+@app.post("/api/sort/apply")
+def sort_apply(body: SortApplyRequest) -> dict:
+    """Effect the chosen mappings. For each SKU we copy:
+
+       processed/{hero}      (if it exists) → processed/sorted/{SKU}.ext
+       processed/{extra_i}   (if it exists) → processed/sorted/{SKU}-{b,c,…}.ext
+
+    Falling back to the raw top-level file when the resized version is
+    absent — that keeps the tool useful before a user has run a resize
+    on the batch, while preferring the white-bg render when available.
+
+    Source files are COPIED, never moved: the batch's top-level
+    originals + processed/ outputs stay intact so the user can re-sort
+    or re-process. processed/sorted/ is the disposable ship-list."""
+    with _sort_jobs_lock:
+        job = _sort_jobs.get(body.job_id)
+        if job is None:
+            raise HTTPException(404, "sort job not found")
+        if job["status"] != "done":
+            raise HTTPException(409, "sort job not done")
+        batch_name = job["batch_name"]
+
+    folder = _resolve_batch(batch_name)
+    out_dir = folder / "processed" / "sorted"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    written: list[dict] = []
+    skipped: list[dict] = []
+    errors: list[dict] = []
+
+    extras_letters = "bcdefghij"  # -b, -c, -d … extras are unusual past 'd' in practice
+
+    for m in body.mappings:
+        if not m.sku:
+            errors.append({"sku": m.sku, "error": "blank sku"})
+            continue
+        if not m.hero:
+            skipped.append({"sku": m.sku, "reason": "no hero selected"})
+            continue
+        # Validate filename + presence at top-level (same safety as elsewhere).
+        for fname in [m.hero, *m.extras]:
+            if "/" in fname or "\\" in fname or ".." in fname:
+                errors.append({"sku": m.sku, "error": f"invalid filename: {fname}"})
+                fname = None
+                break
+        else:
+            fname = m.hero  # passed the safety check
+        if fname is None:
+            continue
+
+        def _resolve_source(name: str) -> Path | None:
+            """Prefer the resized output if it exists; otherwise fall
+            back to the raw original. Returns None if the file is
+            missing entirely."""
+            processed = folder / "processed" / name
+            if processed.is_file():
+                return processed
+            top = folder / name
+            if top.is_file():
+                return top
+            return None
+
+        # Hero → {SKU}.{ext}
+        src = _resolve_source(m.hero)
+        if src is None:
+            errors.append({"sku": m.sku, "error": f"hero file not in batch: {m.hero}"})
+            continue
+        dest = out_dir / f"{m.sku}{src.suffix.lower()}"
+        if dest.exists() and not body.overwrite:
+            skipped.append({"sku": m.sku, "reason": f"{dest.name} already exists"})
+            continue
+        try:
+            shutil.copy2(src, dest)
+        except Exception as e:
+            errors.append({"sku": m.sku, "error": f"copy failed: {e}"})
+            continue
+        written.append({"sku": m.sku, "out": dest.name, "from": src.name})
+
+        # Extras → {SKU}-b.{ext}, {SKU}-c.{ext}, …
+        for i, extra in enumerate(m.extras):
+            if i >= len(extras_letters):
+                errors.append({"sku": m.sku, "error": f"too many extras (>{len(extras_letters)})"})
+                break
+            esrc = _resolve_source(extra)
+            if esrc is None:
+                errors.append({"sku": m.sku, "error": f"extra file not in batch: {extra}"})
+                continue
+            edest = out_dir / f"{m.sku}-{extras_letters[i]}{esrc.suffix.lower()}"
+            if edest.exists() and not body.overwrite:
+                skipped.append({"sku": m.sku, "reason": f"{edest.name} already exists"})
+                continue
+            try:
+                shutil.copy2(esrc, edest)
+            except Exception as e:
+                errors.append({"sku": m.sku, "error": f"extra copy failed: {e}"})
+                continue
+            written.append({"sku": m.sku, "out": edest.name, "from": esrc.name})
+
+    return {
+        "ok": True,
+        "out_dir": str(out_dir),
+        "written": written,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+# ─── Send to Pegasus (M6) ─────────────────────────────────────────────────
+# Picasso writes a batch's processed/sorted/ contents into a configurable
+# sync folder. Syncthing (or any equivalent file-sync tool) is what
+# actually moves the bytes to the warehouse NUC; Picasso never touches
+# the network. Pegasus may later drop a `.picasso-ack.json` ack file
+# back into the destination, which we surface as `pegasus_received_at`.
+
+ACK_FILENAME = ".picasso-ack.json"
+
+
+def _resolve_sync_folder(cfg: Config) -> Path | None:
+    """Expand the configured sync_folder. Returns None if unset/blank
+    (Send is disabled), or if the path is unreachable. Caller surfaces
+    "configure a sync folder first" to the user."""
+    raw = (cfg.sync_folder or "").strip().strip('"').strip("'")
+    if not raw:
+        return None
+    return Path(raw).expanduser()
+
+
+def _read_ack(dest_dir: Path) -> str | None:
+    """Read `.picasso-ack.json` if Pegasus has written one; return its
+    `received_at` timestamp. Schema is intentionally minimal — Pegasus
+    just drops `{ "received_at": "<iso>" }`. Anything malformed or
+    missing returns None."""
+    ack_path = dest_dir / ACK_FILENAME
+    if not ack_path.is_file():
+        return None
+    try:
+        import json
+        data = json.loads(ack_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    val = data.get("received_at")
+    return val if isinstance(val, str) else None
+
+
+@app.post("/api/batches/{name}/send")
+def send_batch(name: str) -> dict:
+    """Copy {batch}/processed/sorted/* into {sync_folder}/{batch_name}/.
+
+    Source = sorted/ exclusively. Without sorted/ the user hasn't run
+    the visual sort yet, and shipping un-renamed photos to Pegasus is
+    almost never what she wants — fail loudly rather than send a mess.
+
+    Output is a flat folder of SKU-named files, plus the ack timestamp
+    if one is already present from a prior cycle. Subsequent sends
+    overwrite by default — Syncthing handles the cross-machine reconcile.
+    """
+    folder = _resolve_batch(name)
+    sorted_dir = folder / "processed" / "sorted"
+    if not sorted_dir.is_dir():
+        raise HTTPException(409, "no processed/sorted/ — run the visual sort first")
+
+    files = sorted(p for p in sorted_dir.iterdir() if p.is_file())
+    if not files:
+        raise HTTPException(409, "processed/sorted/ is empty — nothing to send")
+
+    cfg = load_config(CONFIG_PATH)
+    sync_folder = _resolve_sync_folder(cfg)
+    if sync_folder is None:
+        raise HTTPException(409, "no sync folder configured — set one in Settings")
+    try:
+        sync_folder.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(422, f"could not create sync folder {sync_folder}: {e}")
+
+    dest_dir = sync_folder / name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    for src in files:
+        try:
+            shutil.copy2(src, dest_dir / src.name)
+            written += 1
+        except OSError as e:
+            raise HTTPException(500, f"copy failed at {src.name}: {e}")
+
+    # Carry the batch's attached xlsx alongside the images so Pegasus
+    # has both halves of the curated bundle in one place. Failure is
+    # non-fatal — the images sent successfully and that's the bigger
+    # half of the work; surface the xlsx error in the response so the
+    # UI can flag it.
+    meta = read_meta(folder) or BatchMeta(batch_name=name)
+    xlsx_sent: str | None = None
+    xlsx_error: str | None = None
+    xlsx_path = _batch_xlsx_path(folder, meta)
+    if xlsx_path is not None:
+        try:
+            shutil.copy2(xlsx_path, dest_dir / xlsx_path.name)
+            xlsx_sent = xlsx_path.name
+        except OSError as e:
+            xlsx_error = f"xlsx copy failed: {e}"
+
+    ack = _read_ack(dest_dir)
+    sent_at = now_iso()
+
+    meta.last_sent_at = sent_at
+    meta.last_sent_count = written
+    meta.last_sent_dest = str(dest_dir)
+    if ack:
+        meta.pegasus_received_at = ack
+    write_meta(folder, meta)
+
+    return {
+        "ok": True,
+        "sent_at": sent_at,
+        "sent_count": written,
+        "dest": str(dest_dir),
+        "pegasus_received_at": ack,
+        "xlsx_sent": xlsx_sent,
+        "xlsx_error": xlsx_error,
+    }
+
+
+@app.get("/api/batches/{name}/send-status")
+def send_status(name: str) -> dict:
+    """Re-read the ack file without sending. Lets the UI refresh
+    `pegasus_received_at` after the user thinks the NUC has had time
+    to sync + ack."""
+    folder = _resolve_batch(name)
+    meta = read_meta(folder)
+    last_sent_dest = meta.last_sent_dest if meta else None
+    pegasus_received_at = None
+    if last_sent_dest:
+        ack = _read_ack(Path(last_sent_dest))
+        if ack:
+            pegasus_received_at = ack
+            if meta and meta.pegasus_received_at != ack:
+                meta.pegasus_received_at = ack
+                write_meta(folder, meta)
+    return {
+        "last_sent_at": meta.last_sent_at if meta else None,
+        "last_sent_count": meta.last_sent_count if meta else None,
+        "last_sent_dest": last_sent_dest,
+        "pegasus_received_at": pegasus_received_at or (meta.pegasus_received_at if meta else None),
+    }
 
 
 # ─── Server entry ─────────────────────────────────────────────────────────

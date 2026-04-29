@@ -1,0 +1,95 @@
+# Suffix dictionary for the Sheet check linter.
+#
+# Each entry says: when a SKU ends in `-{id}`, the row's `{column}` cell should
+# describe the same attribute (colour or size). The matcher is conservative:
+# a cell containing ANY of the entry's `keywords` (case-insensitive substring)
+# is treated as consistent. A mismatch is only flagged when the cell also
+# contains a *competing* keyword from a different entry mapped to the same
+# column — that's the signal of a copy-paste error (e.g. `-G` row with
+# COLOUR=RED).
+#
+# Adding a suffix here is the only step needed to extend coverage; the
+# rule engine reads this file at runtime.
+#
+# Multi-char ids are matched longest-first, so `GOL` wins over `G`.
+
+schema_version: 1
+suffixes:
+  # ── Colour ────────────────────────────────────────────────────
+  - id: BR
+    column: COLOUR
+    keywords: [BROWN]
+  - id: W
+    column: COLOUR
+    keywords: [WHITE]
+  - id: CH
+    column: COLOUR
+    keywords: [CHAMPAGNE]
+  - id: GOL
+    column: COLOUR
+    keywords: [GOLD]
+  - id: P
+    column: COLOUR
+    keywords: [PINK]
+  - id: R
+    column: COLOUR
+    keywords: [RED]
+  - id: MT
+    column: COLOUR
+    keywords: [MINT]
+  - id: G
+    column: COLOUR
+    keywords: [GREEN]
+  - id: SIL
+    column: COLOUR
+    keywords: [SILVER]
+  - id: B
+    column: COLOUR
+    keywords: [BLUE]
+  - id: BL
+    column: COLOUR
+    keywords: [BLACK]
+  - id: Y
+    column: COLOUR
+    keywords: [YELLOW]
+  - id: O
+    column: COLOUR
+    keywords: [ORANGE]
+  - id: PUR
+    column: COLOUR
+    keywords: [PURPLE]
+  - id: TUR
+    column: COLOUR
+    keywords: [TURQUOISE, TEAL]
+  - id: IV
+    column: COLOUR
+    keywords: [IVORY]
+  - id: CR
+    column: COLOUR
+    keywords: [CREAM]
+  - id: GR
+    column: COLOUR
+    keywords: [GREY, GRAY]
+  - id: BU
+    column: COLOUR
+    keywords: [BURGUNDY]
+  - id: NA
+    column: COLOUR
+    keywords: [NAVY]
+
+  # ── Size ──────────────────────────────────────────────────────
+  - id: S
+    column: SIZE
+    keywords: [SMALL]
+  - id: M
+    column: SIZE
+    keywords: [MEDIUM]
+  - id: L
+    column: SIZE
+    keywords: [LARGE]
+  - id: XL
+    column: SIZE
+    keywords: ["EXTRA LARGE", XL]
+  - id: XXL
+    column: SIZE
+    keywords: ["DOUBLE EXTRA LARGE", XXL]

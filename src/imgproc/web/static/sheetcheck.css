@@ -1,0 +1,337 @@
+/* Sheet check (xlsx linter). Inherits palette from style.css. */
+
+body { margin: 0; }
+
+.sc-header {
+  background: white;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+}
+.sc-header .back {
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+.sc-header .back:hover { background: var(--bg); color: var(--accent); border-color: var(--accent); }
+.sc-title h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.sc-title .sub { font-size: 12px; color: var(--muted); margin-top: 2px; max-width: 640px; line-height: 1.4; }
+
+.sc-summary {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--muted);
+}
+.sc-summary b { color: var(--text); }
+
+.sc-main {
+  padding: 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.sc-picker {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+.sc-picker h2 {
+  margin: 0 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+.sc-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.sc-picker-label {
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 130px;
+}
+.sc-picker-label code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.sc-picker select,
+.sc-picker input[type="text"] {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: white;
+}
+.sc-picker .primary {
+  padding: 7px 14px;
+  font-size: 13px;
+}
+.sc-picker-or {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  margin: 4px 0 8px;
+}
+.sc-picker-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.sc-picker-hint code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+#sc-results {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sc-results-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.sc-file-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sc-file-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+
+.sc-banner {
+  margin: 12px 20px 0;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+}
+
+/* Read-only hint sits below the file header; muted info-blue, not the
+   alarming amber of the parse-error banner. */
+.sc-readonly-hint {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1e3a8a;
+}
+
+/* Header-action buttons reuse the global button styles, but the
+   primary "Save back" button needs to read as the affirmative action
+   in the bar. */
+.sc-results-actions { display: flex; gap: 8px; }
+.sc-results-actions .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.sc-results-actions .primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.sc-toolbar {
+  display: flex;
+  gap: 12px;
+  padding: 12px 20px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: white;
+  flex-wrap: wrap;
+}
+.sc-toolbar-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sc-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.sc-chip:hover { background: var(--bg); }
+.sc-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.sc-chip .count {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  opacity: 0.7;
+}
+.sc-chip.muted-rule {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.sc-toggle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sc-findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sc-finding {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sc-finding:last-child { border-bottom: none; }
+.sc-finding.muted {
+  opacity: 0.5;
+  background: var(--bg);
+}
+.sc-finding-main {
+  flex: 1;
+  min-width: 0;
+}
+.sc-finding-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  flex-wrap: wrap;
+}
+.sc-severity {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.sc-severity.error    { background: #fee2e2; color: var(--bad); }
+.sc-severity.warning  { background: #fff3e0; color: var(--warn); }
+.sc-severity.info     { background: #dbeafe; color: var(--accent); }
+.sc-rule { color: var(--muted); }
+.sc-row {
+  background: var(--bg);
+  padding: 1px 7px;
+  border-radius: 3px;
+  color: var(--text);
+}
+.sc-sku {
+  font-family: var(--mono);
+  background: var(--bg);
+  padding: 1px 7px;
+  border-radius: 3px;
+  color: var(--text);
+}
+.sc-message {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.sc-suggestion {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-style: italic;
+}
+.sc-suggestion code {
+  font-family: var(--mono);
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-style: normal;
+  color: var(--accent);
+}
+
+.sc-finding-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.sc-finding-actions button {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.sc-finding-actions button:hover { background: var(--bg); color: var(--text); }
+.sc-finding.muted .sc-mute-btn { color: var(--accent); }
+
+.sc-finding-actions .sc-apply-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+.sc-finding-actions .sc-apply-btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: white;
+}
+
+.sc-empty {
+  padding: 60px 20px;
+  text-align: center;
+}
+.sc-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ok);
+  margin-bottom: 6px;
+}
+.sc-empty-sub {
+  font-size: 12px;
+  color: var(--muted);
+}

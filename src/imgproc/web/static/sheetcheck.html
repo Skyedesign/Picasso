@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sheet check · Picasso</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/sheetcheck.css">
+  <link rel="stylesheet" href="/static/modals.css">
+</head>
+<body>
+  <div class="sc-header">
+    <a class="back" href="/">← Batches</a>
+    <div class="sc-title">
+      <h1>Sheet check</h1>
+      <div class="sub">Spreadsheet linter — drop an xlsx and get a list of likely typos and missing fields. Read-only; never edits your file.</div>
+    </div>
+    <div class="sc-summary" id="sc-summary"></div>
+  </div>
+
+  <main class="sc-main">
+    <section class="sc-picker" id="sc-picker">
+      <h2>Pick a spreadsheet</h2>
+      <div class="sc-picker-row">
+        <span class="sc-picker-label">From <code id="sc-source-root">source/</code></span>
+        <select id="sc-source-select">
+          <option value="">— select an xlsx —</option>
+        </select>
+      </div>
+      <div class="sc-picker-or">— or —</div>
+      <div class="sc-picker-row">
+        <span class="sc-picker-label">Paste a path</span>
+        <input id="sc-path-input" type="text" placeholder="e.g. C:\Users\alida\Documents\2026 BELLS.xlsx">
+        <button id="sc-run" class="primary" type="button">Run check</button>
+      </div>
+      <div class="sc-picker-hint">
+        Tip: in Windows Explorer, right-click the xlsx and choose <em>Copy as path</em>.
+        Suppressions are saved next to the file (<code>{name}.xlsx.picasso-suppressions.json</code>).
+      </div>
+    </section>
+
+    <section id="sc-results" hidden>
+      <div class="sc-results-header">
+        <div class="sc-file-info">
+          <div class="sc-file-name" id="sc-file-name">…</div>
+          <div class="sc-file-meta" id="sc-file-meta"></div>
+        </div>
+        <div class="sc-results-actions">
+          <button id="sc-edit-copy" type="button" hidden title="Make an editable working copy in scratch/sheetcheck/">📝 Make editable copy</button>
+          <button id="sc-save-back" class="primary" type="button" hidden title="Copy this working copy back over the original source xlsx">↩ Save back to source</button>
+          <button id="sc-rerun" type="button">Re-run</button>
+        </div>
+      </div>
+      <div class="sc-banner sc-readonly-hint" id="sc-readonly-hint" hidden>
+        Loaded from a read-only path — Apply buttons are hidden. Click <b>Make editable copy</b> to fix typos in a scratch working copy you can save back when you're done.
+      </div>
+
+      <div class="sc-banner" id="sc-banner" hidden></div>
+
+      <div class="sc-toolbar">
+        <div class="sc-toolbar-chips" id="sc-rule-chips"></div>
+        <label class="sc-toggle">
+          <input id="sc-show-muted" type="checkbox">
+          <span>Show muted</span>
+        </label>
+      </div>
+
+      <ul id="sc-findings" class="sc-findings"></ul>
+      <div id="sc-empty" class="sc-empty" hidden>
+        <div class="sc-empty-title">No issues found ✨</div>
+        <div class="sc-empty-sub">All variant rows look consistent.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span id="app-version">Picasso —</span>
+    <span id="app-update-banner" hidden>
+      <a id="app-update-link" href="#">Update available</a>
+    </span>
+  </footer>
+
+  <template id="sc-finding-tpl">
+    <li class="sc-finding">
+      <div class="sc-finding-main">
+        <div class="sc-finding-head">
+          <span class="sc-severity"></span>
+          <span class="sc-rule"></span>
+          <span class="sc-row"></span>
+          <span class="sc-sku"></span>
+        </div>
+        <div class="sc-message"></div>
+        <div class="sc-suggestion" hidden></div>
+      </div>
+      <div class="sc-finding-actions">
+        <button class="sc-apply-btn primary" type="button" hidden title="Write the suggested fix into the spreadsheet">Apply</button>
+        <button class="sc-mute-btn" type="button" title="Hide this specific finding">Mute</button>
+        <button class="sc-mute-rule-btn" type="button" title="Hide all findings from this rule for this file">Mute rule</button>
+      </div>
+    </li>
+  </template>
+
+  <script src="/static/modals.js"></script>
+  <script src="/static/sheetcheck.js"></script>
+  <script src="/static/update_banner.js"></script>
+</body>
+</html>

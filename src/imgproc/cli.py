@@ -15,6 +15,7 @@ from .batch_meta import (
     BatchStats,
     ImageRow,
     now_iso,
+    read_meta,
     write_meta,
 )
 from .config import Config, find_project_root
@@ -289,7 +290,22 @@ def _build_batch_meta(
     stats: GroupStats | None,
     cfg: Config,
 ) -> BatchMeta:
-    """Translate the CLI's row dicts + stats into the BatchMeta sidecar shape."""
+    """Translate the CLI's row dicts + stats into the BatchMeta sidecar shape.
+
+    Carries forward fields owned outside the CLI — `xlsx_filename`
+    (set by the import / attach flow), the send-to-Pegasus state
+    (`last_sent_at` etc.), and per-image verdicts. Without this merge,
+    every Process would silently wipe Alida's reviewer accept/reject
+    decisions and detach the working xlsx, which is what the
+    SHEET C CHRISTMAS BELLS bug exposed.
+    """
+    prior = read_meta(folder)
+    prior_verdicts: dict[str, "ImageVerdict"] = {}
+    if prior:
+        for row in prior.images:
+            if row.verdict is not None:
+                prior_verdicts[row.name] = row.verdict
+
     images: list[ImageRow] = []
     for row in report_rows:
         out_path: Path | None = row.get("output_path")
@@ -304,7 +320,10 @@ def _build_batch_meta(
             output_subfolder=sub,
             output_filename=out_path.name if out_path else None,
             group=None,  # v1.1 hook
-            verdict=None,
+            # Preserve any prior reviewer verdict on this filename. A
+            # re-process re-derives status / metrics / output, but the
+            # verdict belongs to the user, not the engine.
+            verdict=prior_verdicts.get(row["name"]),
         ))
     n_total = len(images)
     n_processed = sum(1 for r in images if r.status in ("within-tolerance", "outlier"))
@@ -329,6 +348,13 @@ def _build_batch_meta(
         last_run_config=cfg.model_dump(),
         stats=bs,
         images=images,
+        # Preserve attach + send state from the prior sidecar. These are
+        # batch-level facts the engine has no opinion on.
+        xlsx_filename=prior.xlsx_filename if prior else None,
+        last_sent_at=prior.last_sent_at if prior else None,
+        last_sent_count=prior.last_sent_count if prior else None,
+        last_sent_dest=prior.last_sent_dest if prior else None,
+        pegasus_received_at=prior.pegasus_received_at if prior else None,
     )
 
 

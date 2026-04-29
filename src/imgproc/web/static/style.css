@@ -53,6 +53,19 @@ header .header-tools {
   gap: 8px;
 }
 
+header .header-tools a {
+  font: inherit;
+  cursor: pointer;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+  transition: background 120ms, border-color 120ms;
+}
+header .header-tools a:hover { background: var(--bg); }
+
 .subtitle {
   color: var(--muted);
   font-size: 12px;
@@ -178,6 +191,16 @@ button.danger:hover {
 .batch-meta .badge.outlier { background: #fff3e0; color: var(--warn); }
 .batch-meta .badge.review  { background: #ffebee; color: var(--bad); }
 .batch-meta .badge.ok      { background: #dcfce7; color: var(--ok); }
+.batch-meta .badge.sent    { background: #dbeafe; color: #1e3a8a; }
+.batch-meta .badge.ack     { background: #dcfce7; color: var(--ok); }
+.batch-meta .badge.xlsx    { background: #ede9fe; color: #6d28d9; }
+
+.batch-send-status {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
 
 .batch-actions {
   display: flex;

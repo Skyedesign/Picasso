@@ -295,8 +295,13 @@
   function writePresets(p) {
     localStorage.setItem(PRESET_KEY, JSON.stringify(p));
   }
-  function saveLocalPreset() {
-    const name = (prompt('Name this preset (e.g. "Stockings", "Hats"):') || '').trim();
+  async function saveLocalPreset() {
+    const raw = await window.modalPrompt('Saves the current ratio + canvas as a named preset.', {
+      title: 'Save preset',
+      placeholder: 'e.g. "Stockings", "Hats"',
+      confirmLabel: 'Save',
+    });
+    const name = (raw || '').trim();
     if (!name) return;
     const presets = readPresets();
     presets[name] = { target_ratio: currentRatio(), canvas_size: _canvasSize.slice() };

@@ -73,6 +73,19 @@ class BatchMeta(BaseModel):
     last_run_config: dict | None = None    # snapshot of the resolved Config
     stats: BatchStats | None = None
     images: list[ImageRow] = Field(default_factory=list)
+    # Send-to-Pegasus state (M6). All optional — older sidecars without
+    # these fields stay valid because Pydantic + the field defaults
+    # cover the absent case.
+    last_sent_at: str | None = None        # ISO 8601 UTC of last successful Send
+    last_sent_count: int | None = None     # files copied in that send
+    last_sent_dest: str | None = None      # absolute path to the destination folder
+    pegasus_received_at: str | None = None # mirror of `.picasso-ack.json`'s timestamp
+    # xlsx-as-batch-asset (post-M6): a batch can carry its own working
+    # copy of Alida's pre-buy xlsx so Sheet check can write fixes back
+    # without touching the source. Filename only — the file lives at
+    # `{batch_folder}/{xlsx_filename}`. None means "no xlsx attached"
+    # and the legacy path-based Sheet check / Sort flows still apply.
+    xlsx_filename: str | None = None
 
 
 # ─── I/O helpers ──────────────────────────────────────────────────────────

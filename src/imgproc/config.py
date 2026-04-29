@@ -25,6 +25,12 @@ class Config(BaseModel):
     skip_lifestyle: bool = True
     lifestyle_bg_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
 
+    # Send to Pegasus (M6) — Picasso writes the SKU-named sorted output to
+    # this folder; Syncthing (or any equivalent) replicates it to the NUC.
+    # Default lands under the user's home dir so it's visible in Explorer
+    # without further setup; blank disables Send entirely.
+    sync_folder: str = "~/Picasso-to-Pegasus"
+
     @field_validator("target_ratio")
     @classmethod
     def _ratio_range(cls, v):
