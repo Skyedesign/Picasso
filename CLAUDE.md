@@ -144,12 +144,35 @@ either side.
 ## Active plan
 v1 expansion plan lives at
 `C:\Users\ian\.claude\plans\cryptic-meandering-engelbart.md`. Done: M1
-(Demo Resizer), M2 (reviewer + foundations). Pending: M3 (PyInstaller
-packaging + GitHub Releases auto-update), M4 (Sheet check / xlsx
-linter), M5 (visual imgproc-sort + dupe detection), M6 (Send to Pegasus
-via Syncthing folder), M7 (Repeat batch with changes), M8 (Pre-buy
-column-strip). Plus a deferred UI-polish task to replace native
-alert/prompt/confirm with themed modals.
+(Demo Resizer), M2 (reviewer + foundations), M3 (packaging + auto-
+update). Pending: M4 (Sheet check / xlsx linter), M5 (visual imgproc-
+sort + dupe detection), M6 (Send to Pegasus via Syncthing folder), M7
+(Repeat batch with changes), M8 (Pre-buy column-strip). Plus a deferred
+UI-polish task to replace native alert/prompt/confirm with themed
+modals.
+
+## Packaging + auto-update (M3 — landed)
+- `build/picasso.spec` + `build/build.ps1` + `build/picasso_entry.py` —
+  PyInstaller --onedir bundle. `collect_all("PIL")` baked into the spec;
+  scipy excluded (imagehash limited to phash). Final bundle ~66 MB.
+- `install.bat` at project root: drops Desktop / Start Menu / Startup
+  shortcuts, writes the install path to `%LOCALAPPDATA%\Picasso\
+  install-path.txt` so `update-alida.bat` is path-agnostic.
+- `update-alida.bat`: zip-drop fallback. Reads the install-path marker;
+  falls back to common locations + prompt if absent.
+- `src/imgproc/updater/{github,swap,__init__}.py` — GitHub Releases
+  client + spawn-detached-batch swap pattern. Backups land in
+  `%LOCALAPPDATA%\Picasso\backups\` (last 3 kept).
+- `web/app.py`: `GET /api/updates/check` + `POST /api/updates/install`,
+  plus a connect-and-check single-instance probe in `run_server()` that
+  opens the browser to the existing instance instead of crashing.
+- `web/static/update_banner.js` — amber footer banner on every page;
+  install-overlay polls for the server's return + reloads.
+
+To ship a release: from project root, `.\build\build.ps1` produces
+`dist\Picasso\` (with install.bat + update-alida.bat already in it).
+Zip the folder, tag a `vX.Y.Z` release on github.com/Skyedesign/Picasso,
+upload as `picasso-vX.Y.Z.zip`. The in-app banner picks it up.
 
 ## When editing both projects at the same time
 - Open the **Pegasus** Claude Code session (it's the consumer and has
