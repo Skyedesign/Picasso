@@ -25,10 +25,9 @@ echo.
 echo  Press Ctrl+C in this window to stop the server.
 echo.
 
-REM Kick off the browser in the background after a short delay so the server is ready.
-start "" /B cmd /c "timeout /t 2 /nobreak >nul & start http://127.0.0.1:8765"
-
-REM Foreground: run the server; Ctrl+C here stops it cleanly.
+REM run_server() opens the browser itself once uvicorn binds, and detects
+REM an already-running instance via a port probe — no need to launch the
+REM browser from here.
 ".venv\Scripts\imgproc-ui.exe"
 
 endlocal

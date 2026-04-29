@@ -1,7 +1,11 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
+# build/ holds PyInstaller spec + scripts (tracked) plus the per-build
+# work dir (.pyinstaller/, generated). Track the sources, ignore the
+# work dir + any sibling .cache/.
+build/.pyinstaller/
+build/.cache/
 dist/
 .venv/
 venv/

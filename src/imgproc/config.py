@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -47,7 +48,14 @@ def find_project_root(start: Path | None = None) -> Path:
     root regardless of the directory the user launched them from — important for
     `imgproc-ui`, which ends up running with cwd=.venv/Scripts on Windows when
     users double-click the installed script.
+
+    PyInstaller frozen mode: the exe's directory IS the project root in a
+    deployed install — `imgproc.yaml` and `batches/` live next to picasso.exe.
+    The walk-up heuristic doesn't apply because pyproject.toml isn't shipped.
     """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys.executable).parent
+
     start = start or Path.cwd()
     for parent in [start, *start.parents]:
         if (parent / "imgproc.yaml").exists() or (parent / "pyproject.toml").exists():

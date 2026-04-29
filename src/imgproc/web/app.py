@@ -12,12 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
 import uuid
+import webbrowser
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, Literal
@@ -45,6 +48,7 @@ from ..config import Config, find_project_root, load_config
 from ..engine import detect_product, normalize_to_canvas
 from ..engine.background import detect_background
 from ..output import status_subfolder
+from ..updater import check_for_update, perform_swap
 
 STATIC = Path(__file__).parent / "static"
 _PROJECT_ROOT = find_project_root()
@@ -1167,8 +1171,104 @@ def apply_preset(name: str, body: ApplyPresetRequest) -> dict:
 
 # ─── Server entry ─────────────────────────────────────────────────────────
 
-def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
-    """Entry point used by the `imgproc-ui` script."""
-    import uvicorn
+# ─── Updater ──────────────────────────────────────────────────────────────
+# Public-repo GitHub Releases lookup. The check endpoint is hit on every
+# page load by the UI banner; install fires on the user's click. Frozen-
+# build only (no swap path makes sense in a dev `pip install -e .` setup).
 
+@app.get("/api/updates/check")
+def updates_check() -> dict:
+    """Return current vs latest version + download URL. Errors surface as
+    {has_update: false, error: "..."} so the UI silently no-ops on a bad
+    network."""
+    from .. import __version__  # local import keeps CLI import-light
+    info = check_for_update(__version__)
+    return {
+        "current_version": info.current_version,
+        "latest_version": info.latest_version,
+        "has_update": info.has_update,
+        "download_url": info.download_url,
+        "release_notes": info.release_notes,
+        "release_url": info.release_url,
+        "error": info.error,
+        "is_frozen": bool(getattr(sys, "frozen", False)),
+    }
+
+
+@app.post("/api/updates/install")
+def updates_install() -> dict:
+    """Kick off the swap. Responds to the client first, then schedules a
+    self-exit so the detached swap script can take over without a port
+    conflict on relaunch."""
+    from .. import __version__
+    if not getattr(sys, "frozen", False):
+        raise HTTPException(503, "in-app updater only works in packaged builds")
+
+    info = check_for_update(__version__)
+    if not info.has_update:
+        raise HTTPException(409, f"no update: latest is {info.latest_version}")
+    if not info.download_url:
+        raise HTTPException(404, "no compatible asset in latest release")
+
+    swap_bat = perform_swap(info.download_url)
+    # Defer exit so the response makes it back to the browser.
+    threading.Timer(1.0, lambda: os._exit(0)).start()
+    return {
+        "ok": True,
+        "from_version": info.current_version,
+        "to_version": info.latest_version,
+        "swap_script": str(swap_bat),
+    }
+
+
+def _is_port_taken(host: str, port: int) -> bool:
+    """Return True if something is already listening on host:port.
+
+    Uses connect-and-check (not bind) so we don't briefly hold the port
+    ourselves — avoids a TOCTOU window where uvicorn would race to bind
+    the same port a moment later.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.5)
+    try:
+        s.connect((host, port))
+        return True
+    except (ConnectionRefusedError, socket.timeout, OSError):
+        return False
+    finally:
+        s.close()
+
+
+def _open_browser_delayed(url: str, delay_seconds: float = 1.5) -> None:
+    """Open the user's browser to `url` after a short delay so uvicorn
+    has time to bind. Runs in a daemon thread; failures are silent."""
+    def _do() -> None:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    t = threading.Timer(delay_seconds, _do)
+    t.daemon = True
+    t.start()
+
+
+def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
+    """Entry point for `imgproc-ui` and the packaged `picasso.exe`.
+
+    Single-instance: if the port is already bound (Picasso already
+    running), open the browser to the existing instance and exit instead
+    of crashing with a bind error. On a fresh start, spawn a delayed
+    browser-open so the user lands on the UI without an extra click.
+    """
+    url = f"http://{host}:{port}/"
+    if _is_port_taken(host, port):
+        print(f"Picasso is already running at {url} — opening your browser.")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+        return
+
+    _open_browser_delayed(url)
+    import uvicorn
     uvicorn.run(app, host=host, port=port, log_level="info")
