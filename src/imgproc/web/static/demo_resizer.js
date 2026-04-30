@@ -12,7 +12,7 @@
 
   const CANVAS_PRESETS = [
     { label: 'Delicious 600×800',    value: [600, 800] },
-    { label: 'Famous Mountain 600×600', value: [600, 600] },
+    { label: 'Famous Mountain 800×800', value: [800, 800] },
   ];
 
   // ─── State ─────────────────────────────────────────────────────────────

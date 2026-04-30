@@ -530,11 +530,11 @@ const EVERYDAY_FIELDS = [
   {
     key: 'output_canvas',
     label: 'Output image shape',
-    hint: 'The size and aspect ratio of the final image. Delicious Display uses 3:4 (600×800); Famous Mountain uses 1:1 (600×600). Per-batch overrides can be set from the Demo Resizer.',
+    hint: 'The size and aspect ratio of the final image. Delicious Display uses 3:4 (600×800); Famous Mountain uses 1:1 (800×800). Per-batch overrides can be set from the Demo Resizer.',
     type: 'canvas_preset',
     presets: [
       { value: [600, 800], label: 'Delicious Display — 600×800 (3:4)' },
-      { value: [600, 600], label: 'Famous Mountain — 600×600 (1:1)' },
+      { value: [800, 800], label: 'Famous Mountain — 800×800 (1:1)' },
     ],
   },
   {
