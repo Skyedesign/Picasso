@@ -132,8 +132,12 @@ ping -n 4 127.0.0.1 >nul
 
 REM 1. Backup the current install (best-effort; never block the swap on a
 REM    backup failure — robocopy is the recovery path of last resort).
+REM    Only zips picasso.exe + _internal\ (the parts that actually change);
+REM    user data folders like batches/ and source/ are intentionally
+REM    excluded — zipping them broke v1.0.0->1.0.1 updates with batches
+REM    of any meaningful size.
 echo Picasso updater: backing up current install...
-powershell -NoProfile -Command "try {{ Compress-Archive -Path '{install}\\*' -DestinationPath '{backup_zip}' -Force; Write-Host '  backup OK' }} catch {{ Write-Host ('  backup skipped: ' + $_.Exception.Message) }}"
+powershell -NoProfile -Command "try {{ Compress-Archive -Path '{install}\\picasso.exe','{install}\\_internal' -DestinationPath '{backup_zip}' -Force; Write-Host '  backup OK' }} catch {{ Write-Host ('  backup skipped: ' + $_.Exception.Message) }}"
 
 REM 2. Robocopy staged → install. /MIR mirrors (deletes stale files in
 REM    the install that aren't in the new build) but /XD/XF guards user
