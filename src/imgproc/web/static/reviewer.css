@@ -307,7 +307,12 @@ body.rv-selecting .rv-tile { cursor: copy; }
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  aspect-ratio: 3/4;
+  /* Was: aspect-ratio: 3/4 — forced 800px-tall frames on a 600px-wide column,
+     pushed the modal past 92vh on smaller displays and looked wrong for 1:1
+     (Famous Mountain) canvases. Now cap max-height so the modal always fits
+     above-the-fold; min-height keeps the frame visible without an image. */
+  min-height: 220px;
+  max-height: calc(92vh - 320px);
   display: flex;
   align-items: center;
   justify-content: center;
